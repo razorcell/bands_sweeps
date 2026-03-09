@@ -31,12 +31,6 @@ enum ENUM_DYN_MEAN_MODE {
     DYN_MEAN_RSI = 1      // Scale via RSI Momentum
 };
 
-enum ENUM_H1_MOMENTUM {
-    H1_MOM_NEUTRAL  = 0,  // Mean was crossed on pullback — no special block
-    H1_MOM_WEAK     = 1,  // Wick touched mean, then reversed
-    H1_MOM_MODERATE = 2,  // Came close to mean but stopped between midpoint & mean
-    H1_MOM_STRONG   = 3   // Pullback did not even reach midpoint between band & mean
-};
 
 //====================================================================
 //                     --- INPUT PARAMETERS ---
@@ -265,26 +259,6 @@ input bool                 Show_Liquidity_Lines    = false; // [TOGGLE] Show hor
 input bool                 Show_LQ_Labels          = false; // [TOGGLE] Show text labels on liquidity lines (if lines are shown)
 input bool                 Show_Liquidity_Clusters = false; // [TOGGLE] Show liquidity clusters as colored zones
 
-input string               __H1MomGate__ = "=== 16. H1 Momentum Strength Gate ===";
-input bool                 Use_H1_Mom_Gate        = true;   // [TOGGLE] Block counter-trend entries by H1 momentum strength
-input bool                 Allow_Sell_Strong_Up   = true;   // [TOGGLE] Allow SELL against Strong H1 UP momentum
-input bool                 Allow_Buy_Strong_Down  = false;  // [TOGGLE] Allow BUY against Strong H1 DOWN momentum
-
-enum ENUM_H1_MOM_MODE { MOM_ZIGZAG, MOM_GAP_RATIO };
-input ENUM_H1_MOM_MODE     H1_Mom_Detection     = MOM_GAP_RATIO; // [TOGGLE] Momentum Detection Method
-input int                  H1_Mom_Lookback      = 50;     // H1 bars to look back for swing & pullback detection
-
-// --- ZZ Method ---
-input double               H1_ZigZag_Dev_Pct    = 0.5;    // [ZZ] ZigZag Price Deviation (%)
-input int                  H1_ZigZag_Pivot_Legs = 2;      // [ZZ] ZigZag Pivot Legs
-input double               Fib_Weak_Ext     = 0.382;      // [ZZ] Min Fib extension required when H1 is WEAK
-input double               Fib_Mod_Ext      = 0.500;      // [ZZ] Min Fib extension required when H1 is MODERATE
-input double               Fib_Strong_Ext   = 0.618;      // [ZZ] Min Fib extension required when H1 is STRONG
-
-// --- Gap-Ratio Method ---
-input double               Gap_Weak_Ext         = 0.0;    // [GAP] Wait Ratio past previous extreme (Weak Pullback)
-input double               Gap_Mod_Ext          = 1.0;    // [GAP] Wait Ratio past previous extreme (Moderate Pullback)
-input double               Gap_Strong_Ext       = 2.0;    // [GAP] Wait Ratio past previous extreme (Strong Pullback)
 
 //--- Global Variables
 CTrade trade;
@@ -409,17 +383,6 @@ bool m1_post_squeeze_release = false; // M1 squeeze released, awaiting MSS
 int  m1_sqz_release_dir      = 0;     // 1 for UP break, -1 for DOWN break
 double m1_sqz_mss_level      = 0.0;   // The structurally protective fractal price
 
-// H1 Momentum Strength Gate
-ENUM_H1_MOMENTUM h1_momentum_strength = H1_MOM_NEUTRAL; // Current H1 momentum classification
-int      h1_mom_pullback_bar      = -1;   // H1 bar index of the last detected pullback peak/trough
-double   h1_fib_gate_price        = 0.0;  // Price level that unlocks counter-trend entries
-bool     h1_fib_gate_clear        = true; // true = price has reached the required Fib extension
-double   h1_last_swing_hi         = 0.0;  // H1 swing high used for Fib calculation (start of last leg)
-double   h1_last_swing_lo         = 0.0;  // H1 swing low  used for Fib calculation (end of last leg)
-double   h1_gap_based_gap         = 0.0;  // Gap between pullback and mean
-double   h1_gap_based_ratio       = 0.0;  // Current calculated gap ratio requirement
-string   d_h1_mom_txt             = "NEUTRAL";
-color    d_h1_mom_col             = clrGray;
 
 // 1M Squeeze + Major Liquidity Synergy
 bool   d_m1_squeeze_lq_syn   = false; // True when M1 squeeze exits toward a major/EQ liquidity level
@@ -602,7 +565,7 @@ bool UpdateIndicatorBuffers() {
     if(CopyBuffer(handle_BB_M5, 0, 0, BBSlope_Lookback + 1, hist_base_m5) <= 0) return false; ArraySetAsSeries(hist_base_m5, true);
 
     // H1 BB history — must cover relative-width average window AND momentum gate lookback
-    int h1_hist_needed = MathMax(H1_Squeeze_Avg_Bars, H1_Mom_Lookback) + 10;
+    int h1_hist_needed = H1_Squeeze_Avg_Bars + 10;
     if(CopyBuffer(handle_BB_H1, 1, 0, h1_hist_needed, bb_up_h1_hist) <= 0) return false; ArraySetAsSeries(bb_up_h1_hist, true);
     if(CopyBuffer(handle_BB_H1, 2, 0, h1_hist_needed, bb_dn_h1_hist) <= 0) return false; ArraySetAsSeries(bb_dn_h1_hist, true);
     if(CopyBuffer(handle_ATR_H1, 0, 0, h1_hist_needed, atr_h1_hist) <= 0) return false; ArraySetAsSeries(atr_h1_hist, true);
@@ -780,245 +743,6 @@ bool IsM1Squeezed() {
 // M1 Post Squeeze Release logic relies on Market Structure Shifts and is handled
 // dynamically inside OnTick().
 
-//+------------------------------------------------------------------+
-//| H1 Momentum Strength Classification                              |
-//|                                                                  |
-//| Examines the most recent pullback on the H1 timeframe and        |
-//| measures how far price retraced toward the H1 BB mean.           |
-//|                                                                  |
-//| For a DOWNTREND (d_h1_trend == -1), upward pullbacks:            |
-//|   STRONG   : pullback high < midpoint between mean & upper band  |
-//|   MODERATE : pullback high >= midpoint but did NOT touch mean    |
-//|   WEAK     : pullback wick touched/exceeded mean, closed below   |
-//|   NEUTRAL  : pullback bar closed above mean (no block)           |
-//| Mirror logic for uptrend.                                        |
-//+------------------------------------------------------------------+
-ENUM_H1_MOMENTUM ClassifyH1Momentum() {
-    h1_mom_pullback_bar = -1; // reset
-    h1_gap_based_gap = 0.0;
-    
-    if(!Use_H1_Mom_Gate) return H1_MOM_NEUTRAL;
-    if(d_h1_trend == 0)  return H1_MOM_NEUTRAL;
-    int bars_avail = ArraySize(bb_up_h1_hist);
-    if(bars_avail < H1_ZigZag_Pivot_Legs * 2 + 1) return H1_MOM_NEUTRAL;
-    
-    int limit = MathMin(H1_Mom_Lookback, bars_avail - MathMax(H1_ZigZag_Pivot_Legs, 1) - 1);
-
-    int best_bar = -1;
-
-    if (H1_Mom_Detection == MOM_GAP_RATIO) {
-        // --- GAP RATIO METHOD ---
-        // 1. Find the most recent pullback peak/trough (fractal point)
-        int idx_pb = -1;
-        
-        if (d_h1_trend == -1) {
-            // DOWN TREND: current trend direction is down.
-            // Look backward for the most recent fractal high (the pullback peak against the trend)
-            for (int k = 1; k <= limit; k++) {
-                if (iHigh(_Symbol, InpHTF2, k) > iHigh(_Symbol, InpHTF2, k-1) && 
-                    iHigh(_Symbol, InpHTF2, k) > iHigh(_Symbol, InpHTF2, k+1)) {
-                    idx_pb = k;
-                    break;
-                }
-            }
-            if (idx_pb == -1) return H1_MOM_NEUTRAL; // No pullback found yet
-            
-            // 2. Find the low price left before retracing
-            // Search backwards from the pullback peak for the lowest low, stopping if we hit the mean
-            int idx_low = idx_pb;
-            double min_low = iLow(_Symbol, InpHTF2, idx_pb);
-            for (int k = idx_pb + 1; k <= limit; k++) {
-                if (iLow(_Symbol, InpHTF2, k) < min_low) {
-                    min_low = iLow(_Symbol, InpHTF2, k);
-                    idx_low = k;
-                }
-                double m = (bb_up_h1_hist[k] + bb_dn_h1_hist[k]) / 2.0;
-                if (iHigh(_Symbol, InpHTF2, k) >= m) break; // Reached previous mean touch
-            }
-            
-            best_bar = idx_pb;
-            h1_mom_pullback_bar = best_bar;
-            h1_last_swing_hi = iHigh(_Symbol, InpHTF2, idx_pb); // Save for drawing (pullback peak)
-            h1_last_swing_lo = min_low;                           // Save for drawing & gate (previous low)
-            
-            // 3. Classify Strength using the pullback peak bar
-            double pb_mean  = (bb_up_h1_hist[best_bar] + bb_dn_h1_hist[best_bar]) / 2.0;
-            double pb_dn    = bb_dn_h1_hist[best_bar];
-            double pb_close = iClose(_Symbol, InpHTF2, best_bar);
-            double pb_high  = h1_last_swing_hi;
-            
-            if (pb_close >= pb_mean) {
-                h1_gap_based_gap = 0.0;
-                return H1_MOM_NEUTRAL; // Trend neutralized
-            } else if (pb_high >= pb_mean) {
-                h1_gap_based_gap = 0.0;
-                return H1_MOM_WEAK;    // Wick touched mean, did not break
-            } else {
-                h1_gap_based_gap = pb_mean - pb_high;
-                double pb_midpt = pb_mean - (pb_mean - pb_dn) / 2.0; // Midpoint of lower band half
-                if (pb_high >= pb_midpt) return H1_MOM_MODERATE;     // Reached mid zone
-                return H1_MOM_STRONG;                                // Did not reach mid zone
-            }
-            
-        } else {
-            // UP TREND: current trend direction is up.
-            // Look backward for the most recent fractal low (the pullback trough against the trend)
-            for (int k = 1; k <= limit; k++) {
-                if (iLow(_Symbol, InpHTF2, k) < iLow(_Symbol, InpHTF2, k-1) && 
-                    iLow(_Symbol, InpHTF2, k) < iLow(_Symbol, InpHTF2, k+1)) {
-                    idx_pb = k;
-                    break;
-                }
-            }
-            if (idx_pb == -1) return H1_MOM_NEUTRAL; // No pullback found yet
-            
-            // 2. Find the high price left before retracing
-            // Search backwards from the pullback trough for the highest high, stopping if we hit the mean
-            int idx_hi = idx_pb;
-            double max_high = iHigh(_Symbol, InpHTF2, idx_pb);
-            for (int k = idx_pb + 1; k <= limit; k++) {
-                if (iHigh(_Symbol, InpHTF2, k) > max_high) {
-                    max_high = iHigh(_Symbol, InpHTF2, k);
-                    idx_hi = k;
-                }
-                double m = (bb_up_h1_hist[k] + bb_dn_h1_hist[k]) / 2.0;
-                if (iLow(_Symbol, InpHTF2, k) <= m) break; // Reached previous mean touch
-            }
-            
-            best_bar = idx_pb;
-            h1_mom_pullback_bar = best_bar;
-            h1_last_swing_lo = iLow(_Symbol, InpHTF2, idx_pb); // Save for drawing (pullback trough)
-            h1_last_swing_hi = max_high;                         // Save for drawing & gate (previous high)
-            
-            // 3. Classify Strength
-            double pb_mean  = (bb_up_h1_hist[best_bar] + bb_dn_h1_hist[best_bar]) / 2.0;
-            double pb_up    = bb_up_h1_hist[best_bar];
-            double pb_close = iClose(_Symbol, InpHTF2, best_bar);
-            double pb_low   = h1_last_swing_lo;
-            
-            if (pb_close <= pb_mean) {
-                h1_gap_based_gap = 0.0;
-                return H1_MOM_NEUTRAL; // Trend neutralized
-            } else if (pb_low <= pb_mean) {
-                h1_gap_based_gap = 0.0;
-                return H1_MOM_WEAK;    // Wick touched mean, did not break
-            } else {
-                h1_gap_based_gap = pb_low - pb_mean;
-                double pb_midpt = pb_mean + (pb_up - pb_mean) / 2.0; // Midpoint of upper band half
-                if (pb_low <= pb_midpt) return H1_MOM_MODERATE;      // Reached mid zone
-                return H1_MOM_STRONG;                                // Did not reach mid zone
-            }
-        }
-        
-    } else {
-        // --- ZIG ZAG METHOD ---
-        // Standard ZigZag logic mirroring TradingView
-        // state: 1 = currently pushing up, -1 = currently pushing down
-        int state = 0; 
-        double extreme_val = 0;
-        int extreme_bar = limit;
-        
-        int last_locked_hi = -1;
-        int last_locked_lo = -1;
-    
-        // determine initial state at the oldest bar in the lookback
-        if(iClose(_Symbol, InpHTF2, limit) >= iOpen(_Symbol, InpHTF2, limit)) {
-            state = 1; extreme_val = iHigh(_Symbol, InpHTF2, limit);
-        } else {
-            state = -1; extreme_val = iLow(_Symbol, InpHTF2, limit);
-        }
-    
-        // traverse forward towards the present
-        for(int k = limit - 1; k >= H1_ZigZag_Pivot_Legs; k--) {
-            double h = iHigh(_Symbol, InpHTF2, k);
-            double l = iLow(_Symbol, InpHTF2, k);
-            
-            // Ensure Pivot Legs logic: the high/low must strictly be an extreme over ± j bars
-            bool is_pivot_high = true;
-            bool is_pivot_low  = true;
-            for(int j = 1; j <= H1_ZigZag_Pivot_Legs; j++) {
-                if(h <= iHigh(_Symbol, InpHTF2, k - j) || h <= iHigh(_Symbol, InpHTF2, k + j)) is_pivot_high = false;
-                if(l >= iLow (_Symbol, InpHTF2, k - j) || l >= iLow (_Symbol, InpHTF2, k + j)) is_pivot_low  = false;
-            }
-    
-            if(state == 1) { // currently pushing up
-                if(is_pivot_high && h >= extreme_val) {
-                    extreme_val = h;
-                    extreme_bar = k;
-                }
-                if(is_pivot_low) {
-                    // TradingView logic: price dropped by Deviation (%) from the extreme
-                    double dev_pct = ((extreme_val - l) / extreme_val) * 100.0;
-                    if(dev_pct >= H1_ZigZag_Dev_Pct) {
-                        last_locked_hi = extreme_bar;
-                        state = -1;
-                        extreme_val = l;
-                        extreme_bar = k;
-                    }
-                }
-            } else { // currently pushing down
-                if(is_pivot_low && l <= extreme_val) {
-                    extreme_val = l;
-                    extreme_bar = k;
-                }
-                if(is_pivot_high) {
-                    // TradingView logic: price rallied by Deviation (%) from the extreme
-                    double dev_pct = ((h - extreme_val) / extreme_val) * 100.0;
-                    if(dev_pct >= H1_ZigZag_Dev_Pct) {
-                        last_locked_lo = extreme_bar;
-                        state = 1;
-                        extreme_val = h;
-                        extreme_bar = k;
-                    }
-                }
-            }
-        }
-    
-        if(d_h1_trend == -1) {
-            best_bar = last_locked_hi;
-            if(best_bar <= 0) {
-                double best_hi = 0.0;
-                for(int k = 1; k <= limit; k++) {
-                    double h = iHigh(_Symbol, InpHTF2, k);
-                    if(h > best_hi) { best_hi = h; best_bar = k; }
-                }
-            }
-        } else {
-            best_bar = last_locked_lo;
-            if(best_bar <= 0) {
-                double best_lo = 1e9;
-                for(int k = 1; k <= limit; k++) {
-                    double l = iLow(_Symbol, InpHTF2, k);
-                    if(l < best_lo) { best_lo = l; best_bar = k; }
-                }
-            }
-        }
-    
-        if(best_bar <= 0) return H1_MOM_NEUTRAL;
-        h1_mom_pullback_bar = best_bar; // save for ComputeH1FibGate
-    }
-
-    double mean  = (bb_up_h1_hist[best_bar] + bb_dn_h1_hist[best_bar]) / 2.0;
-    double upper = bb_up_h1_hist[best_bar];
-    double lower = bb_dn_h1_hist[best_bar];
-    double bar_close = iClose(_Symbol, InpHTF2, best_bar);
-    
-    if(d_h1_trend == -1) {
-        double midpt = mean + (upper - mean) / 2.0;
-        double bar_high = iHigh(_Symbol, InpHTF2, best_bar);
-        if(bar_close >= mean)  return H1_MOM_NEUTRAL;
-        if(bar_high  >= mean)  return H1_MOM_WEAK;
-        if(bar_high  >= midpt) return H1_MOM_MODERATE;
-        return H1_MOM_STRONG;
-    } else {
-        double midpt = mean - (mean - lower) / 2.0;
-        double bar_low = iLow(_Symbol, InpHTF2, best_bar);
-        if(bar_close <= mean)  return H1_MOM_NEUTRAL;
-        if(bar_low   <= mean)  return H1_MOM_WEAK;
-        if(bar_low   <= midpt) return H1_MOM_MODERATE;
-        return H1_MOM_STRONG;
-    }
-}
 
 //+------------------------------------------------------------------+
 //| H1 Fibonacci Extension Gate                                      |
@@ -1031,114 +755,6 @@ ENUM_H1_MOMENTUM ClassifyH1Momentum() {
 //| swing_hi (uptrend). Mapped by momentum strength:                 |
 //|   WEAK 38.2% | MODERATE 50% | STRONG 61.8%                      |
 //+------------------------------------------------------------------+
-void ComputeH1FibGate() {
-    h1_fib_gate_clear = true;
-    h1_last_swing_hi  = 0.0;
-    h1_last_swing_lo  = 0.0;
-    h1_gap_based_ratio = 0.0;
-    
-    if(!Use_H1_Mom_Gate || h1_momentum_strength == H1_MOM_NEUTRAL || d_h1_trend == 0) return;
-    if(h1_mom_pullback_bar < 1) return; // ClassifyH1Momentum must have run first
-
-    double ext_pct = 0.0;
-    if (H1_Mom_Detection == MOM_ZIGZAG) {
-        if(h1_momentum_strength == H1_MOM_WEAK)           ext_pct = Fib_Weak_Ext;
-        else if(h1_momentum_strength == H1_MOM_MODERATE)  ext_pct = Fib_Mod_Ext;
-        else                                              ext_pct = Fib_Strong_Ext;
-    } else {
-        if(h1_momentum_strength == H1_MOM_WEAK)           ext_pct = Gap_Weak_Ext;
-        else if(h1_momentum_strength == H1_MOM_MODERATE)  ext_pct = Gap_Mod_Ext;
-        else                                              ext_pct = Gap_Strong_Ext;
-        
-        h1_gap_based_ratio = atr_h1[0] * ext_pct;
-    }
-
-    datetime current_pullback_time = iTime(_Symbol, InpHTF2, h1_mom_pullback_bar);
-
-    if(d_h1_trend == -1) {
-        // ---- DOWNTREND ----
-        if (H1_Mom_Detection == MOM_ZIGZAG) {
-            h1_last_swing_hi = iHigh(_Symbol, InpHTF2, h1_mom_pullback_bar);
-            
-            // Find the lowest confirmed trough (fractal low) between the swing high and now
-            double best_lo = 1e9;
-            int best_lo_idx = -1;
-            for(int k = 1; k < h1_mom_pullback_bar; k++) {
-                double l  = iLow(_Symbol, InpHTF2, k);
-                double lr = iLow(_Symbol, InpHTF2, k - 1);
-                double ll = iLow(_Symbol, InpHTF2, k + 1);
-                if(l <= lr && l <= ll) { // Fractal trough
-                    if(l < best_lo) {
-                        best_lo = l;
-                        best_lo_idx = k;
-                    }
-                }
-            }
-            
-            // Fallback: If no trough exists (straight drop), use the lowest closed bar
-            if(best_lo_idx < 0) {
-                best_lo_idx = iLowest(_Symbol, InpHTF2, MODE_LOW, h1_mom_pullback_bar - 1, 1);
-                if(best_lo_idx < 0) best_lo_idx = 0;
-                best_lo = iLow(_Symbol, InpHTF2, best_lo_idx);
-            }
-            
-            h1_last_swing_lo = best_lo;
-        }
-
-        if(h1_last_swing_hi <= h1_last_swing_lo) return;
-        
-        if (H1_Mom_Detection == MOM_ZIGZAG) {
-            double swing_range = h1_last_swing_hi - h1_last_swing_lo;
-            h1_fib_gate_price = h1_last_swing_lo - (swing_range * ext_pct);
-        } else {
-            h1_fib_gate_price = h1_last_swing_lo - h1_gap_based_ratio;
-        }
-        
-        double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-        h1_fib_gate_clear = (bid <= h1_fib_gate_price);
-    } else {
-        // ---- UPTREND ----
-        if (H1_Mom_Detection == MOM_ZIGZAG) {
-            h1_last_swing_lo = iLow(_Symbol, InpHTF2, h1_mom_pullback_bar);
-            
-            // Find the highest confirmed peak (fractal high) between the swing low and now
-            double best_hi = 0.0;
-            int best_hi_idx = -1;
-            for(int k = 1; k < h1_mom_pullback_bar; k++) {
-                double h  = iHigh(_Symbol, InpHTF2, k);
-                double hr = iHigh(_Symbol, InpHTF2, k - 1);
-                double hl = iHigh(_Symbol, InpHTF2, k + 1);
-                if(h >= hr && h >= hl) { // Fractal peak
-                    if(h > best_hi) {
-                        best_hi = h;
-                        best_hi_idx = k;
-                    }
-                }
-            }
-            
-            // Fallback: If no peak exists, use the highest closed bar
-            if(best_hi_idx < 0) {
-                best_hi_idx = iHighest(_Symbol, InpHTF2, MODE_HIGH, h1_mom_pullback_bar - 1, 1);
-                if(best_hi_idx < 0) best_hi_idx = 0;
-                best_hi = iHigh(_Symbol, InpHTF2, best_hi_idx);
-            }
-            
-            h1_last_swing_hi = best_hi;
-        }
-
-        if(h1_last_swing_hi <= h1_last_swing_lo) return;
-        
-        if (H1_Mom_Detection == MOM_ZIGZAG) {
-            double swing_range = h1_last_swing_hi - h1_last_swing_lo;
-            h1_fib_gate_price = h1_last_swing_hi + (swing_range * ext_pct);
-        } else {
-            h1_fib_gate_price = h1_last_swing_hi + h1_gap_based_ratio;
-        }
-
-        double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-        h1_fib_gate_clear = (ask >= h1_fib_gate_price);
-    }
-}
 
 
 //+------------------------------------------------------------------+
@@ -1667,22 +1283,6 @@ void EvaluateDashboardStates() {
         h1_squeeze_danger = false; h1_post_squeeze_release = false;
         m5_squeeze_danger = false; m5_post_squeeze_release = false;
         m1_squeeze_danger = false; m1_post_squeeze_release = false;
-    }
-
-    // --- 6c. H1 Momentum Strength Gate ---
-    h1_momentum_strength = ClassifyH1Momentum();
-    ComputeH1FibGate();
-
-    // Dashboard text & colour for momentum strength
-    switch(h1_momentum_strength) {
-        case H1_MOM_WEAK:
-            d_h1_mom_txt = "WEAK (Touched Mean)";    d_h1_mom_col = clrDarkGoldenrod;  break;
-        case H1_MOM_MODERATE:
-            d_h1_mom_txt = "MODERATE (Near Mean)";   d_h1_mom_col = clrDarkOrange;  break;
-        case H1_MOM_STRONG:
-            d_h1_mom_txt = "STRONG (No Midpt Touch)"; d_h1_mom_col = clrRed;    break;
-        default:
-            d_h1_mom_txt = "NEUTRAL";                 d_h1_mom_col = clrDimGray;   break;
     }
 
     // --- 6d. 1M Squeeze + Major Liquidity Synergy ---
@@ -2283,53 +1883,6 @@ void DrawDashboard() {
         DrawLabel("dash_m1sqz",   "", x, y+=gap, clrNONE);
     }
 
-    // --- H1 Momentum Strength + Fib Gate rows ---
-    if(Use_H1_Mom_Gate) {
-        // Row 1: Momentum strength
-        string mom_row = htf2_str + " Momentum: " + d_h1_mom_txt;
-        if(d_h1_trend == 0) mom_row += " (No Trend)";
-        DrawLabel("dash_h1_mom", mom_row, x, y+=gap, d_h1_mom_col);
-
-        // Row 2: Fib gate status
-        if(h1_momentum_strength > H1_MOM_NEUTRAL && d_h1_trend != 0) {
-            double ext_pct = 0.0;
-            if (H1_Mom_Detection == MOM_ZIGZAG) {
-                ext_pct = (h1_momentum_strength == H1_MOM_WEAK) ? Fib_Weak_Ext : (h1_momentum_strength == H1_MOM_MODERATE) ? Fib_Mod_Ext : Fib_Strong_Ext;
-            } else {
-                ext_pct = (h1_momentum_strength == H1_MOM_WEAK) ? Gap_Weak_Ext : (h1_momentum_strength == H1_MOM_MODERATE) ? Gap_Mod_Ext : Gap_Strong_Ext;
-            }
-            
-            string gate_side = (d_h1_trend == -1) ? "BUY" : "SELL";
-            string gate_txt;
-            color  gate_col;
-            
-            bool is_absolute_block = false;
-            if(h1_momentum_strength == H1_MOM_STRONG) {
-                if(d_h1_trend == -1 && !Allow_Buy_Strong_Down) is_absolute_block = true;
-                if(d_h1_trend ==  1 && !Allow_Sell_Strong_Up)  is_absolute_block = true;
-            }
-
-            if(is_absolute_block) {
-                gate_txt = htf2_str + " Fib Gate [" + gate_side + "]: DISABLED (Strong Mom Block)";
-                gate_col = clrRed;
-            } else if(h1_fib_gate_clear) {
-                string pct_str = (H1_Mom_Detection == MOM_ZIGZAG) ? DoubleToString(ext_pct*100, 1) + "%" : DoubleToString(ext_pct, 1) + "x GAP";
-                gate_txt = htf2_str + " Fib Gate [" + gate_side + "]: CLEARED (" + pct_str + " Ext)";
-                gate_col = clrGreen;
-            } else {
-                string pct_str = (H1_Mom_Detection == MOM_ZIGZAG) ? DoubleToString(ext_pct*100, 1) + "%" : DoubleToString(ext_pct, 1) + "x GAP";
-                gate_txt = htf2_str + " Fib Gate [" + gate_side + " BLOCKED]: Need " + pct_str
-                         + " Ext @ " + DoubleToString(h1_fib_gate_price, 5);
-                gate_col = clrRed;
-            }
-            DrawLabel("dash_h1_fib", gate_txt, x, y+=gap, gate_col);
-        } else {
-            DrawLabel("dash_h1_fib", htf2_str + " Fib Gate: N/A (Neutral)", x, y+=gap, clrGray);
-        }
-    } else {
-        DrawLabel("dash_h1_mom", htf2_str + " Mom Gate: DISABLED", x, y+=gap, clrGray);
-        DrawLabel("dash_h1_fib", "", x, y+=gap, clrNONE);
-    }
     // --- M1 Squeeze + Major Liquidity Synergy alert ---
     if(d_m1_squeeze_lq_syn) {
         DrawLabel("dash_sqz_lq", "! " + d_m1_sqz_lq_txt, x, y+=gap, clrPurple);
@@ -2614,32 +2167,6 @@ void CheckEntry() {
             valid_sell_setup = false;
         }
     }
-
-    // --- H1 Momentum Gate ---
-    // When a strong trend is detected on H1, block counter-trend entries until price
-    // has swept the required Fibonacci extension beyond the last swing extreme.
-    // Down-trend strong → no BUY until fib gate to the downside is swept.
-    // Up-trend strong   → no SELL until fib gate to the upside is reached.
-    if(Use_H1_Mom_Gate && h1_momentum_strength > H1_MOM_NEUTRAL && !effective_ranging_h1) {
-        bool absolute_block_buy  = false;
-        bool absolute_block_sell = false;
-        
-        // 1. Check for Absolute blocks when momentum is STRONG
-        if(h1_momentum_strength == H1_MOM_STRONG) {
-            if(d_h1_trend == -1 && !Allow_Buy_Strong_Down) absolute_block_buy  = true;
-            if(d_h1_trend ==  1 && !Allow_Sell_Strong_Up)  absolute_block_sell = true;
-        }
-        
-        if(absolute_block_buy)  valid_buy_setup  = false;
-        if(absolute_block_sell) valid_sell_setup = false;
-        
-        // 2. If an absolute block hasn't killed the trade, check the standard Fib Gate
-        if(!h1_fib_gate_clear) {
-            if(d_h1_trend == -1 && !absolute_block_buy)  valid_buy_setup  = false; // block counter-trend buy
-            if(d_h1_trend ==  1 && !absolute_block_sell) valid_sell_setup = false; // block counter-trend sell
-        }
-    }
-
 
     // Track Peak Speeds LIVE as price approaches entries
     if(Entry_Strategy == ENTRY_DECELERATION) {
@@ -2994,7 +2521,6 @@ void UpdateVisuals() {
     DrawH1MeanZoneLines();
 
     // NEW: Draw H1 detected swing + Fib gate lines for visual verification
-    DrawH1SwingGateLines();
 
     // NEW: Draw M1 Momentum State Points
     DrawM1MomentumPoints();
@@ -3331,76 +2857,6 @@ void DrawH1MeanZoneLines() {
 //|   White  solid  = Fib extension gate price (unlock level)        |
 //| Lines are hidden when the gate is NEUTRAL or disabled.           |
 //+------------------------------------------------------------------+
-void DrawH1SwingGateLines() {
-    string n_hi  = "vis_h1gate_hi";
-    string n_lo  = "vis_h1gate_lo";
-    string n_ext = "vis_h1gate_ext";
-    string n_hi_txt  = "vis_h1gate_hi_txt";
-    string n_lo_txt  = "vis_h1gate_lo_txt";
-    string n_ext_txt = "vis_h1gate_ext_txt";
-
-    // Clean up when disabled or neutral
-    if(!Use_H1_Mom_Gate || h1_momentum_strength == H1_MOM_NEUTRAL || d_h1_trend == 0
-       || h1_last_swing_hi <= 0 || h1_last_swing_lo <= 0) {
-        ObjectDelete(0, n_hi);  ObjectDelete(0, n_lo);  ObjectDelete(0, n_ext);
-        ObjectDelete(0, n_hi_txt); ObjectDelete(0, n_lo_txt); ObjectDelete(0, n_ext_txt);
-        return;
-    }
-
-    // --- Swing HIGH line (blue dashed) ---
-    if(ObjectFind(0, n_hi) < 0) ObjectCreate(0, n_hi, OBJ_HLINE, 0, 0, h1_last_swing_hi);
-    ObjectSetDouble(0,  n_hi, OBJPROP_PRICE, h1_last_swing_hi);
-    ObjectSetInteger(0, n_hi, OBJPROP_COLOR, clrBlue);
-    ObjectSetInteger(0, n_hi, OBJPROP_STYLE, STYLE_DASH);
-    ObjectSetInteger(0, n_hi, OBJPROP_WIDTH, 1);
-    ObjectSetInteger(0, n_hi, OBJPROP_BACK, true);
-
-    // --- Swing LOW line (blue dashed) ---
-    if(ObjectFind(0, n_lo) < 0) ObjectCreate(0, n_lo, OBJ_HLINE, 0, 0, h1_last_swing_lo);
-    ObjectSetDouble(0,  n_lo, OBJPROP_PRICE, h1_last_swing_lo);
-    ObjectSetInteger(0, n_lo, OBJPROP_COLOR, clrBlue);
-    ObjectSetInteger(0, n_lo, OBJPROP_STYLE, STYLE_DASH);
-    ObjectSetInteger(0, n_lo, OBJPROP_WIDTH, 1);
-    ObjectSetInteger(0, n_lo, OBJPROP_BACK, true);
-
-    // --- Fib Extension gate line (black solid, thicker) ---
-    color ext_col = h1_fib_gate_clear ? clrGreen : clrBlack;
-    if(ObjectFind(0, n_ext) < 0) ObjectCreate(0, n_ext, OBJ_HLINE, 0, 0, h1_fib_gate_price);
-    ObjectSetDouble(0,  n_ext, OBJPROP_PRICE, h1_fib_gate_price);
-    ObjectSetInteger(0, n_ext, OBJPROP_COLOR, ext_col);
-    ObjectSetInteger(0, n_ext, OBJPROP_STYLE, STYLE_SOLID);
-    ObjectSetInteger(0, n_ext, OBJPROP_WIDTH, 2);
-    ObjectSetInteger(0, n_ext, OBJPROP_BACK, true);
-
-    // --- Text labels (pinned 10 bars right) ---
-    datetime lbl_t = iTime(_Symbol, _Period, 0) + (PeriodSeconds(_Period) * 10);
-    double ext_pct = (h1_momentum_strength == H1_MOM_WEAK) ? Fib_Weak_Ext
-                   : (h1_momentum_strength == H1_MOM_MODERATE) ? Fib_Mod_Ext : Fib_Strong_Ext;
-                   
-    string mode_str = (H1_Mom_Detection == MOM_ZIGZAG) ? "ZZ" : "GAP GAP:" + DoubleToString(h1_gap_based_gap, 5);
-
-    // Swing Hi label
-    if(ObjectFind(0, n_hi_txt) < 0) { ObjectCreate(0, n_hi_txt, OBJ_TEXT, 0, lbl_t, h1_last_swing_hi); ObjectSetInteger(0, n_hi_txt, OBJPROP_FONTSIZE, 8); ObjectSetString(0, n_hi_txt, OBJPROP_FONT, "Courier New"); ObjectSetInteger(0, n_hi_txt, OBJPROP_ANCHOR, ANCHOR_LEFT_LOWER); }
-    ObjectSetInteger(0, n_hi_txt, OBJPROP_TIME, 0, lbl_t); ObjectSetDouble(0, n_hi_txt, OBJPROP_PRICE, 0, h1_last_swing_hi);
-    ObjectSetString(0,  n_hi_txt, OBJPROP_TEXT, " H1 Swing Hi"); ObjectSetInteger(0, n_hi_txt, OBJPROP_COLOR, clrBlue);
-
-    // Swing Lo label
-    if(ObjectFind(0, n_lo_txt) < 0) { ObjectCreate(0, n_lo_txt, OBJ_TEXT, 0, lbl_t, h1_last_swing_lo); ObjectSetInteger(0, n_lo_txt, OBJPROP_FONTSIZE, 8); ObjectSetString(0, n_lo_txt, OBJPROP_FONT, "Courier New"); ObjectSetInteger(0, n_lo_txt, OBJPROP_ANCHOR, ANCHOR_LEFT_UPPER); }
-    ObjectSetInteger(0, n_lo_txt, OBJPROP_TIME, 0, lbl_t); ObjectSetDouble(0, n_lo_txt, OBJPROP_PRICE, 0, h1_last_swing_lo);
-    ObjectSetString(0,  n_lo_txt, OBJPROP_TEXT, " H1 Swing Lo"); ObjectSetInteger(0, n_lo_txt, OBJPROP_COLOR, clrBlue);
-
-    // Gate label
-    string gate_lbl = "";
-    if (H1_Mom_Detection == MOM_ZIGZAG) {
-        gate_lbl = StringFormat(" %s %.0f%% Gate: %.5f (%s)", mode_str, ext_pct * 100, h1_fib_gate_price, h1_fib_gate_clear ? "CLEAR" : "BLOCKED");
-    } else {
-        gate_lbl = StringFormat(" %s ATR Ratio %.1fx: %.5f (%s)", mode_str, ext_pct, h1_fib_gate_price, h1_fib_gate_clear ? "CLEAR" : "BLOCKED");
-    }
-    
-    if(ObjectFind(0, n_ext_txt) < 0) { ObjectCreate(0, n_ext_txt, OBJ_TEXT, 0, lbl_t, h1_fib_gate_price); ObjectSetInteger(0, n_ext_txt, OBJPROP_FONTSIZE, 8); ObjectSetString(0, n_ext_txt, OBJPROP_FONT, "Courier New"); ObjectSetInteger(0, n_ext_txt, OBJPROP_ANCHOR, ANCHOR_LEFT_LOWER); }
-    ObjectSetInteger(0, n_ext_txt, OBJPROP_TIME, 0, lbl_t); ObjectSetDouble(0, n_ext_txt, OBJPROP_PRICE, 0, h1_fib_gate_price);
-    ObjectSetString(0,  n_ext_txt, OBJPROP_TEXT, gate_lbl); ObjectSetInteger(0, n_ext_txt, OBJPROP_COLOR, ext_col);
-}
 
 void DrawClusters(datetime current_time) {
     ObjectsDeleteAll(0, "vis_clust_"); 

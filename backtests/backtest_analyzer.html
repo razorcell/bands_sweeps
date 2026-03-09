@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>MT5 Backtest Analyzer</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
     <script src="trades_data.js" onerror="console.log('No auto-loaded data yet')"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&display=swap" rel="stylesheet">
     <style>
@@ -39,9 +40,6 @@
             border-bottom: 1px solid var(--border-color);
             background: rgba(15, 23, 42, 0.5);
             backdrop-filter: var(--glass-blur);
-            position: sticky;
-            top: 0;
-            z-index: 10;
         }
 
         h1 {
@@ -162,8 +160,224 @@
             height: 100% !important;
         }
 
+        .tabs {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 1rem;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 1rem;
+        }
+
+        .tab-btn {
+            background: transparent;
+            color: var(--text-muted);
+            border: 1px solid transparent;
+            padding: 0.75rem 1.5rem;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .tab-btn:hover {
+            color: var(--text-main);
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .tab-btn.active {
+            color: var(--accent);
+            border-color: var(--accent);
+            background: rgba(59, 130, 246, 0.1);
+        }
+
+        .tab-content {
+            display: none;
+            flex-direction: column;
+            gap: 2rem;
+        }
+
+        .tab-content.active {
+            display: flex;
+        }
+
         .positive { color: var(--success); }
         .negative { color: var(--danger); }
+
+        .calendar-controls-floating {
+            position: fixed;
+            right: 2rem;
+            top: 250px;
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+            z-index: 50;
+            background: rgba(30, 41, 59, 0.4);
+            padding: 0.75rem;
+            border-radius: 12px;
+            border: 1px solid rgba(255,255,255,0.05);
+            backdrop-filter: var(--glass-blur);
+        }
+
+        .calendar-container {
+            display: flex;
+            flex-direction: column;
+            gap: 2rem;
+            padding-bottom: 2rem;
+            align-items: center; /* center the single boxes */
+        }
+
+        .calendar-month {
+            background: #1e293b; /* Use solid color instead of translucent panel-bg to prevent scroll artifacts */
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 1.5rem;
+            width: 100%;
+            max-width: 800px;
+            box-sizing: border-box;
+            transition: max-width 0.3s ease;
+        }
+        
+        .calendar-container.full-width .calendar-month {
+            max-width: 100%;
+        }
+
+        .calendar-month-title {
+            font-size: 1.25rem;
+            font-weight: 600;
+            margin-bottom: 1rem;
+            text-align: center;
+        }
+
+        /* 
+           We use a CSS Grid where:
+           - 1st col is the Month Label
+           - The rest are the 5 Weekdays (Mon-Fri)
+        */
+        .calendar-grid {
+            display: grid;
+            grid-template-columns: 80px repeat(5, 1fr);
+            gap: 0.5rem;
+            align-items: center;
+        }
+        
+        /* For the Month row markers */
+        .calendar-month-label {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            font-weight: 600;
+            text-align: right;
+            padding-right: 0.5rem;
+            writing-mode: horizontal-tb;
+            border-right: 2px solid rgba(255,255,255,0.1);
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            justify-content: center;
+            position: relative;
+            z-index: 1; /* Keep behind sticky headers */
+        }
+
+        .calendar-day-header {
+            text-align: center;
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            font-weight: 600;
+            padding: 0.5rem;
+            position: sticky;
+            top: 104px; /* Account for the main page header */
+            background: #1e293b;
+            z-index: 5;
+            border-bottom: 1px solid var(--border-color);
+            transform: translateZ(0); /* Force compositor layer to prevent sticky tearing */
+        }
+
+        .calendar-day {
+            aspect-ratio: 1;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            border-radius: 8px;
+            border: 1px solid rgba(255,255,255,0.05);
+            padding: 0.25rem;
+            font-size: 0.85rem;
+            cursor: default;
+            transition: aspect-ratio 0.3s ease, min-height 0.3s ease;
+        }
+
+        .calendar-container.full-width .calendar-day {
+            aspect-ratio: auto;
+            min-height: 80px;
+        }
+
+        .calendar-day.empty {
+            background: transparent;
+            border: none;
+        }
+
+        .calendar-day.profit {
+            background: rgba(16, 185, 129, 0.2);
+            color: var(--success);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+        }
+        
+        .calendar-day.loss {
+            background: rgba(239, 68, 68, 0.2);
+            color: var(--danger);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+        }
+
+        .calendar-day.neutral {
+            background: rgba(255, 255, 255, 0.05);
+            color: var(--text-muted);
+        }
+
+        .calendar-date {
+            font-size: 0.75rem;
+            opacity: 0.7;
+            margin-bottom: 0.25rem;
+            display: flex;
+            align-items: center;
+            gap: 0.25rem;
+        }
+
+        .calendar-doy {
+            font-size: 0.6rem;
+            opacity: 0.5;
+            background: rgba(255,255,255,0.1);
+            padding: 1px 4px;
+            border-radius: 4px;
+        }
+
+        .calendar-value {
+            font-weight: 700;
+            font-size: 0.85rem;
+            margin-bottom: 0.25rem;
+        }
+
+        .recovery-pill {
+            font-size: 0.65rem;
+            padding: 2px 6px;
+            border-radius: 12px;
+            background: rgba(255,255,255,0.1);
+            color: var(--text-muted);
+            font-weight: 600;
+            white-space: nowrap;
+        }
+        
+        .recovery-pill.recovered {
+            background: rgba(16, 185, 129, 0.2);
+            color: var(--success);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+        }
+        
+        .recovery-pill.pending {
+            background: rgba(239, 68, 68, 0.2);
+            color: var(--danger);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+        }
 
         @media (max-width: 1024px) {
             .charts-container {
@@ -179,12 +393,21 @@
         <p style="color: var(--text-muted); margin-top: 0.5rem;">Insights on Trade Entry Speed vs. Profitability</p>
     </header>
 
+    <div class="fixed-controls" id="floating-direction-filter" style="display: none; position: fixed; right: 20px; top: 120px; z-index: 1000; background: var(--bg-card); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color); box-shadow: 0 4px 6px rgba(0,0,0,0.3); flex-direction: column; gap: 8px;">
+        <label for="directionFilter" style="color: var(--text-muted); font-size: 0.85rem; font-weight: 600;">Trade Direction Filter</label>
+        <select id="directionFilter" class="btn" style="appearance: auto; padding: 0.5rem 1rem; cursor: pointer; border-color: #3b82f6;">
+            <option value="all">All (Buy & Sell)</option>
+            <option value="buy">Buy Only</option>
+            <option value="sell">Sell Only</option>
+        </select>
+    </div>
+
     <div class="container">
         
         <div class="upload-section" id="upload-section">
             <div class="file-input-wrapper">
                 <button class="btn">Select Additional Reports manually</button>
-                <input type="file" id="fileInput" multiple accept=".html">
+                <input type="file" id="fileInput" multiple>
             </div>
             
             <div id="report-selector-container" style="display: none; margin-left: auto;">
@@ -197,43 +420,186 @@
             <div style="margin-left: 20px; color: var(--text-muted);" id="upload-status">Awaiting files...</div>
         </div>
 
-        <div class="stats-grid" id="stats-grid" style="display: none;">
-            <div class="stat-card">
-                <div class="stat-title">Total Analyzed Trades</div>
-                <div class="stat-value" id="totalTrades">-</div>
+        <div class="tabs" id="tabs-container" style="display: none;">
+            <button class="tab-btn active" onclick="switchTab('speed-tab')">Speed Edge</button>
+            <button class="tab-btn" onclick="switchTab('time-tab')">Time & Duration Edge</button>
+            <button class="tab-btn" onclick="switchTab('sequence-tab')">Sequence & Direction Edge</button>
+            <button class="tab-btn" onclick="switchTab('calendar-tab')">Calendar View</button>
+        </div>
+
+        <div id="speed-tab" class="tab-content active">
+            <div class="stats-grid" id="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-title">Total Analyzed Trades</div>
+                    <div class="stat-value" id="totalTrades">-</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-title">Overall Win Rate</div>
+                    <div class="stat-value" id="winRate">-</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-title">Long & Short Nets</div>
+                    <div class="stat-value" id="generalNets" style="display: flex; flex-direction: column; gap: 0.2rem;">-</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-title">Most Profitable Speed Range</div>
+                    <div class="stat-value positive" id="bestSpeed">-</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-title">Most Loss-Making Speed Range</div>
+                    <div class="stat-value negative" id="worstSpeed">-</div>
+                </div>
             </div>
-            <div class="stat-card">
-                <div class="stat-title">Overall Win Rate</div>
-                <div class="stat-value" id="winRate">-</div>
+
+            <div class="charts-container" id="speed-charts-container" style="display: flex; flex-direction: column;">
+                <div class="chart-box" id="chart4d-wrapper" style="display:none; padding: 1.5rem;">
+                    <h3 style="margin-top:0;">4D Speed Momentum Analysis</h3>
+                    <div id="chart4d" style="width: 100%; height: 600px;"></div>
+                </div>
+
+                <div class="chart-box" id="chart3d-profit-wrapper" style="display:none; padding: 1.5rem;">
+                    <h3 style="margin-top:0;">3D Grouped Profit Multiplier (Curr vs Prev Speed)</h3>
+                    <p style="font-size: 0.75rem; color: var(--text-muted); margin-top: -5px; margin-bottom: 10px;">Click a floating bucket to view underlying trades</p>
+                    <div id="chart3d-profit" style="width: 100%; height: 500px;"></div>
+                </div>
+
+                <div class="chart-box" id="chart-heatmap-wrapper" style="display:none; padding: 1.5rem;">
+                    <h3 style="margin-top:0;">2D Profit Heatmap (Curr vs Prev Speed)</h3>
+                    <p style="font-size: 0.75rem; color: var(--text-muted); margin-top: -5px; margin-bottom: 10px;">Click a grid square to view underlying trades</p>
+                    <div id="chart-heatmap" style="width: 100%; height: 500px;"></div>
+                </div>
+
+                <div class="chart-box">
+                    <h3 style="margin-top:0;">Speed vs. Profit Extravaganza (Scatter)</h3>
+                    <div style="position: relative; height: 350px;">
+                        <canvas id="scatterChart"></canvas>
+                    </div>
+                </div>
+                
+                <div class="chart-box">
+                    <h3 style="margin-top:0;">Net Profit by Speed Group</h3>
+                    <p style="font-size: 0.75rem; color: var(--text-muted); margin-top: -5px; margin-bottom: 10px;">Click a bar to view underlying trades</p>
+                    <div style="position: relative; height: 330px;">
+                        <canvas id="barChart"></canvas>
+                    </div>
+                </div>
             </div>
-            <div class="stat-card">
-                <div class="stat-title">Most Profitable Speed Range</div>
-                <div class="stat-value positive" id="bestSpeed">-</div>
+
+        </div>
+
+        <!-- NEW TABS CONTENT -->
+        <div id="time-tab" class="tab-content">
+            <div class="stats-grid" id="time-stats">
+                <div class="stat-card">
+                    <div class="stat-title">Average Win Duration</div>
+                    <div class="stat-value" id="avgWinDuration">-</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-title">Average Loss Duration</div>
+                    <div class="stat-value" id="avgLossDuration">-</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-title">Best Trading Hour</div>
+                    <div class="stat-value positive" id="bestHour">-</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-title">Worst Trading Hour</div>
+                    <div class="stat-value negative" id="worstHour">-</div>
+                </div>
             </div>
-            <div class="stat-card">
-                <div class="stat-title">Most Loss-Making Speed Range</div>
-                <div class="stat-value negative" id="worstSpeed">-</div>
+            <div class="charts-container">
+                <div class="chart-box">
+                    <h3 style="margin-top:0;">Trade Duration vs. Profit (Scatter)</h3>
+                    <div style="position: relative; height: 350px;">
+                        <canvas id="durationScatterChart"></canvas>
+                    </div>
+                </div>
+                <div class="chart-box">
+                    <h3 style="margin-top:0;">Net Profit by Time of Day (Hour)</h3>
+                    <div style="position: relative; height: 350px;">
+                        <canvas id="timeOfDayBarChart"></canvas>
+                    </div>
+                </div>
             </div>
         </div>
 
-        <div class="charts-container" id="charts-container" style="display: none;">
-            <div class="chart-box">
-                <h3 style="margin-top:0;">Speed vs. Profit Extravaganza (Scatter)</h3>
-                <div style="position: relative; height: 350px;">
-                    <canvas id="scatterChart"></canvas>
+        <div id="sequence-tab" class="tab-content">
+            <div class="stats-grid" id="seq-stats">
+                <div class="stat-card">
+                    <div class="stat-title">Long Trade Win Rate</div>
+                    <div class="stat-value" id="longWinRate">-</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-title">Short Trade Win Rate</div>
+                    <div class="stat-value" id="shortWinRate">-</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-title">Long Total Profit</div>
+                    <div class="stat-value" id="longProfit">-</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-title">Short Total Profit</div>
+                    <div class="stat-value" id="shortProfit">-</div>
                 </div>
             </div>
-            <div class="chart-box">
-                <h3 style="margin-top:0;">Net Profit by Speed Group</h3>
-                <div style="position: relative; height: 350px;">
-                    <canvas id="barChart"></canvas>
+            <div class="charts-container">
+                <div class="chart-box">
+                    <h3 style="margin-top:0;">Long vs Short Profit Breakdown</h3>
+                    <div style="position: relative; height: 350px; display: flex; justify-content: center;">
+                        <canvas id="directionPieChart"></canvas>
+                    </div>
                 </div>
+                <div class="chart-box">
+                    <h3 style="margin-top:0;">Consecutive Wins vs Losses</h3>
+                    <div style="position: relative; height: 350px;">
+                        <canvas id="streakBarChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="calendar-tab" class="tab-content">
+            <div class="calendar-controls-floating">
+                <button class="btn" style="padding: 0.6rem 1rem; font-size: 0.85rem; background: transparent; color: var(--text-main); border: 1px solid var(--border-color);" onclick="toggleFullWidth()" id="fullWidthBtn">Full Width</button>
+                <button class="btn" style="padding: 0.6rem 1rem; font-size: 0.85rem;" onclick="zoomCalendar(0.1)">+ Grow</button>
+                <button class="btn" style="padding: 0.6rem 1rem; font-size: 0.85rem;" onclick="zoomCalendar(-0.1)">- Shrink</button>
+            </div>
+            
+            <div class="calendar-container" id="calendar-container">
+                <!-- Months will be injected here -->
+            </div>
+        </div>
+
+        <div id="bucket-details-container" style="display: none; margin-top: 1.5rem; background: var(--panel-bg); border: 1px solid var(--border-color); border-radius: 12px; padding: 1.5rem; backdrop-filter: var(--glass-blur);">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                <div style="display: flex; align-items: center; gap: 1.5rem;">
+                    <h3 style="margin: 0;" id="bucket-details-title">Trades</h3>
+                    <div id="bucket-details-summary" style="display: flex; gap: 1rem; font-size: 0.95rem;"></div>
+                </div>
+                <button class="btn" style="padding: 0.5rem 1rem; font-size: 0.875rem;" onclick="hideBucketDetails()">Close</button>
+            </div>
+            <div style="overflow-x: auto; max-height: 400px; overflow-y: auto;">
+                <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 0.9rem;">
+                    <thead style="position: sticky; top: 0; background: var(--panel-bg); z-index: 1;">
+                        <tr>
+                            <th style="padding: 0.75rem; border-bottom: 1px solid var(--border-color); color: var(--text-muted); cursor: pointer; user-select: none;" onclick="handleSort('entry_time')">Entry Time <span id="sort-entry_time">▲</span></th>
+                            <th style="padding: 0.75rem; border-bottom: 1px solid var(--border-color); color: var(--text-muted); cursor: pointer; user-select: none;" onclick="handleSort('exit_time')">Exit Time <span id="sort-exit_time"></span></th>
+                            <th style="padding: 0.75rem; border-bottom: 1px solid var(--border-color); color: var(--text-muted); cursor: pointer; user-select: none;" onclick="handleSort('trade_type')">Type <span id="sort-trade_type"></span></th>
+                            <th style="padding: 0.75rem; border-bottom: 1px solid var(--border-color); color: var(--text-muted); cursor: pointer; user-select: none;" onclick="handleSort('speed')">Speed <span id="sort-speed"></span></th>
+                            <th style="padding: 0.75rem; border-bottom: 1px solid var(--border-color); color: var(--text-muted); cursor: pointer; user-select: none;" onclick="handleSort('profit')">Profit <span id="sort-profit"></span></th>
+                            <th style="padding: 0.75rem; border-bottom: 1px solid var(--border-color); color: var(--text-muted);">Comment</th>
+                        </tr>
+                    </thead>
+                    <tbody id="bucket-details-body">
+                    </tbody>
+                </table>
             </div>
         </div>
 
     </div>
 
     <script>
+        let currentCalendarZoom = 1.0;
         // Chart instances
         let scatterChartInstance = null;
         let barChartInstance = null;
@@ -241,20 +607,68 @@
 
         document.getElementById('fileInput').addEventListener('change', handleFiles);
         document.getElementById('reportSelect').addEventListener('change', handleReportSelection);
+        document.getElementById('directionFilter').addEventListener('change', handleReportSelection);
 
         document.addEventListener('DOMContentLoaded', () => {
+            // Load existing reports from local storage
+            const storedReports = localStorage.getItem('mt5EdgeReports');
+            if (storedReports) {
+                try {
+                    allReports = JSON.parse(storedReports);
+                } catch(e) {
+                    console.error("Failed to parse local storage reports", e);
+                }
+            }
+            
+            // If python auto-injected reports exist (via trades_data.js), merge them
             if (window.autoLoadedReports && window.autoLoadedReports.length > 0) {
-                allReports = window.autoLoadedReports;
-                
+                window.autoLoadedReports.forEach(autoReport => {
+                    const existingIndex = allReports.findIndex(r => r.filename === autoReport.filename);
+                    if (existingIndex !== -1) {
+                        allReports[existingIndex] = autoReport; // Update existing
+                    } else {
+                        allReports.push(autoReport);
+                    }
+                });
+                // Clear the auto-loaded var so it doesn't artificially keep appending identical objects
+                window.autoLoadedReports = [];
+                // Save the merged data back to local storage
+                saveToLocalStorage();
+            }
+            
+            if (allReports.length > 0) {
                 let totalTrades = 0;
                 allReports.forEach(r => totalTrades += r.trades.length);
-                
-                document.getElementById('upload-status').innerHTML = `<span style="color:var(--success);">Automagically loaded ${allReports.length} reports!</span>`;
+                document.getElementById('upload-status').innerHTML = `<span style="color:var(--success);">Loaded ${allReports.length} reports from storage!</span>`;
                 
                 populateReportDropdown();
-                handleReportSelection(); // Loads "All Combined Reports" by default
+                
+                // Attempt to restore last selected report
+                const lastSelectedFilename = localStorage.getItem('mt5LastSelectedReport');
+                if (lastSelectedFilename) {
+                    const select = document.getElementById('reportSelect');
+                    if (lastSelectedFilename === "all") {
+                        select.value = "all";
+                    } else {
+                        const idx = allReports.findIndex(r => r.filename === lastSelectedFilename);
+                        if (idx !== -1) select.value = idx.toString();
+                    }
+                }
+                
+                handleReportSelection();
+            } else {
+                document.getElementById('upload-status').innerHTML = 'Awaiting manual report upload...';
             }
         });
+        
+        function saveToLocalStorage() {
+            try {
+                localStorage.setItem('mt5EdgeReports', JSON.stringify(allReports));
+            } catch(e) {
+                console.error("Local storage is full or disabled", e);
+                document.getElementById('upload-status').innerHTML = `<span class="negative">Warning: Too many reports, cannot save to local storage.</span>`;
+            }
+        }
         
         function populateReportDropdown() {
             const select = document.getElementById('reportSelect');
@@ -269,6 +683,7 @@
             });
             
             document.getElementById('report-selector-container').style.display = 'flex';
+            document.getElementById('floating-direction-filter').style.display = 'flex';
         }
         
         function handleReportSelection() {
@@ -277,25 +692,46 @@
             
             let tradesToShow = [];
             if (val === "all") {
+                localStorage.setItem('mt5LastSelectedReport', 'all');
+                const uniqueTrades = new Set();
                 allReports.forEach(report => {
-                    tradesToShow = tradesToShow.concat(report.trades);
+                    report.trades.forEach(t => {
+                        const uniqueKey = `${t.entry_time}_${t.exit_time}_${t.profit}_${t.speed}`;
+                        if (!uniqueTrades.has(uniqueKey)) {
+                            uniqueTrades.add(uniqueKey);
+                            tradesToShow.push(t);
+                        }
+                    });
                 });
             } else {
-                tradesToShow = allReports[parseInt(val)].trades;
+                const selectedIdx = parseInt(val);
+                if (allReports[selectedIdx]) {
+                    localStorage.setItem('mt5LastSelectedReport', allReports[selectedIdx].filename);
+                    tradesToShow = allReports[selectedIdx].trades;
+                }
+            }
+            
+            const directionVal = document.getElementById('directionFilter').value;
+            if (directionVal !== 'all') {
+                tradesToShow = tradesToShow.filter(t => t.trade_type === directionVal);
             }
             
             if (tradesToShow.length > 0) {
-                document.getElementById('stats-grid').style.display = 'grid';
-                document.getElementById('charts-container').style.display = 'grid';
+                document.getElementById('tabs-container').style.display = 'flex';
                 updateDashboard(tradesToShow);
             } else {
-                document.getElementById('stats-grid').style.display = 'none';
-                document.getElementById('charts-container').style.display = 'none';
+                // If filtered out entirely
+                document.getElementById('tabs-container').style.display = 'none';
+                if (scatterChartInstance) scatterChartInstance.destroy();
+                if (barChartInstance) barChartInstance.destroy();
+                document.getElementById('chart4d-wrapper').style.display = 'none';
+                document.getElementById('chart3d-profit-wrapper').style.display = 'none';
+                document.getElementById('chart-heatmap-wrapper').style.display = 'none';
             }
         }
 
         async function handleFiles(event) {
-            const files = Array.from(event.target.files).filter(f => f.name.endsWith('.html') || f.name.endsWith('.htm'));
+            const files = Array.from(event.target.files);
             if (files.length === 0) return;
 
             document.getElementById('upload-status').textContent = `Processing ${files.length} file(s)...`;
@@ -317,13 +753,21 @@
                 }
             }
             
+            saveToLocalStorage();
+            
             let totalTrades = 0;
             allReports.forEach(r => totalTrades += r.trades.length);
 
-            document.getElementById('upload-status').textContent = `Done. Total ${totalTrades} trades loaded.`;
+            document.getElementById('upload-status').textContent = `Done. Total ${totalTrades} trades loaded in storage.`;
             
             if (allReports.length > 0) {
                 populateReportDropdown();
+                // Set the dropdown to the most recently selected file if there was only 1 uploaded
+                if (files.length === 1) {
+                    const select = document.getElementById('reportSelect');
+                    const idx = allReports.findIndex(r => r.filename === files[0].name);
+                    if (idx !== -1) select.value = idx.toString();
+                }
                 handleReportSelection();
             }
         }
@@ -337,8 +781,8 @@
                     let htmlString = "";
                     const view = new Uint8Array(arrayBuffer);
                     
-                    // Basic check for UTF-16LE (alternating nulls)
-                    if (view.length > 4 && view[1] === 0) {
+                    // Check for UTF-16LE (BOM 0xFF, 0xFE) or alternating nulls
+                    if (view.length > 4 && ((view[0] === 255 && view[1] === 254) || view[1] === 0)) {
                         htmlString = new TextDecoder('utf-16le').decode(arrayBuffer);
                     } else {
                         htmlString = new TextDecoder('utf-8').decode(arrayBuffer);
@@ -355,6 +799,10 @@
 
                         let dirIdx = -1;
                         let headerIdx = -1;
+                        let profitIdx = -1;
+                        let commentIdx = -1;
+                        let timeIdx = -1;
+                        let typeIdx = -1;
 
                         // Scan all rows to find the actual table headers (in MT5 this could be row 700+)
                         for (let r = 0; r < rows.length; r++) {
@@ -366,6 +814,8 @@
                                 if (text === 'profit') { profitIdx = idx; foundProfit = true; }
                                 if (text === 'comment' || text === 'comments') commentIdx = idx;
                                 if (text === 'direction') dirIdx = idx;
+                                if (text === 'time') timeIdx = idx;
+                                if (text === 'type') typeIdx = idx;
                             });
                             
                             // We need profit and comment. Break if we found profit in THIS row.
@@ -377,38 +827,91 @@
 
                         if (headerIdx !== -1) {
                             let pendingSpeed = null;
+                            let pendingPrevSpeed = null;
+                            let pendingTimeSec = null;
                             let pendingComment = null;
-
-                            for (let i = headerIdx + 1; i < rows.length; i++) {
-                                const cells = rows[i].querySelectorAll('td');
+                            let pendingEntryTime = null;
+                            let pendingTradeType = null;
+                            
+                            for (let r = headerIdx + 1; r < rows.length; r++) {
+                                const cells = rows[r].querySelectorAll('td');
                                 if (cells.length > Math.max(profitIdx, commentIdx)) {
-                                    const profitText = cells[profitIdx].textContent.trim().replace(/[^\d.-]/g, '');
+                                    const profitText = cells[profitIdx].textContent.trim();
                                     const commentText = cells[commentIdx].textContent.trim();
-                                    const profit = parseFloat(profitText);
+                                    const direction = dirIdx !== -1 && cells.length > dirIdx ? cells[dirIdx].textContent.trim().toLowerCase() : "";
+                                    const tradeTime = timeIdx !== -1 && cells.length > timeIdx ? cells[timeIdx].textContent.trim() : "";
+                                    const tradeType = typeIdx !== -1 && cells.length > typeIdx ? cells[typeIdx].textContent.trim().toLowerCase() : "";
                                     
-                                    const speedMatch = commentText.match(/\|\s*(-?\d+(?:\.\d+)?)\s*pts\/s/i) || 
-                                                       commentText.match(/speed.*?(-?\d+(?:\.\d+)?)/i) || 
-                                                       commentText.match(/spd.*?(-?\d+(?:\.\d+)?)/i);
-
-                                    if (dirIdx !== -1 && cells.length > dirIdx) {
-                                        const direction = cells[dirIdx].textContent.trim().toLowerCase();
-                                        if (direction === 'in') {
-                                            if (speedMatch) {
-                                                pendingSpeed = parseFloat(speedMatch[1]);
-                                                pendingComment = commentText;
-                                            }
-                                        } else if (direction === 'out' && pendingSpeed !== null) {
-                                            if (!isNaN(profit)) {
-                                                trades.push({ profit, speed: pendingSpeed, comment: pendingComment });
-                                            }
-                                            pendingSpeed = null;
-                                            pendingComment = null;
+                                    if (direction === 'in') {
+                                        const speed4dMatch = commentText.match(/(?:B|S)\|(-?\d+(?:\.\d+)?)\|(-?\d+(?:\.\d+)?)\|(\d+)/i);
+                                        const speedMatch = commentText.match(/\|\s*(-?\d+(?:\.\d+)?)\s*pts\/s/i) || 
+                                                           commentText.match(/speed.*?(-?\d+(?:\.\d+)?)/i) || 
+                                                           commentText.match(/spd.*?(-?\d+(?:\.\d+)?)/i);
+                                        
+                                        if (speed4dMatch) {
+                                            pendingSpeed = parseFloat(speed4dMatch[1]);
+                                            pendingPrevSpeed = parseFloat(speed4dMatch[2]);
+                                            pendingTimeSec = parseInt(speed4dMatch[3], 10);
+                                            pendingComment = commentText;
+                                            pendingEntryTime = tradeTime;
+                                            pendingTradeType = tradeType;
+                                        } else if (speedMatch) {
+                                            pendingSpeed = parseFloat(speedMatch[1]);
+                                            pendingComment = commentText;
+                                            pendingEntryTime = tradeTime;
+                                            pendingTradeType = tradeType;
                                         }
-                                    } else {
-                                        // Fallback if no direction column
-                                        if (!isNaN(profit) && profit !== 0 && speedMatch) {
-                                            const speed = parseFloat(speedMatch[1]);
-                                            trades.push({ profit, speed, comment: commentText });
+                                    } else if (direction === 'out' && pendingSpeed !== null) {
+                                        const cleanProfit = profitText.replace(/[^\d.-]/g, '');
+                                        const profit = parseFloat(cleanProfit);
+                                        if (!isNaN(profit)) {
+                                            let tradeObj = { 
+                                                profit, 
+                                                speed: pendingSpeed, 
+                                                comment: pendingComment,
+                                                entry_time: pendingEntryTime,
+                                                exit_time: tradeTime,
+                                                trade_type: pendingTradeType
+                                            };
+                                            if (pendingPrevSpeed !== null) {
+                                                tradeObj.prev_speed = pendingPrevSpeed;
+                                                tradeObj.time_sec = pendingTimeSec;
+                                            }
+                                            trades.push(tradeObj);
+                                        }
+                                        pendingSpeed = null;
+                                        pendingPrevSpeed = null;
+                                        pendingTimeSec = null;
+                                        pendingComment = null;
+                                    } else if (direction === "") {
+                                        const speed4dMatch = commentText.match(/(?:B|S)\|(-?\d+(?:\.\d+)?)\|(-?\d+(?:\.\d+)?)\|(\d+)/i);
+                                        const speedMatch = commentText.match(/\|\s*(-?\d+(?:\.\d+)?)\s*pts\/s/i) || 
+                                                           commentText.match(/speed.*?(-?\d+(?:\.\d+)?)/i) || 
+                                                           commentText.match(/spd.*?(-?\d+(?:\.\d+)?)/i);
+                                        const cleanProfit = profitText.replace(/[^\d.-]/g, '');
+                                        const profit = parseFloat(cleanProfit);
+                                        if (!isNaN(profit) && profit !== 0) {
+                                            if (speed4dMatch) {
+                                                trades.push({ 
+                                                    profit, 
+                                                    speed: parseFloat(speed4dMatch[1]), 
+                                                    prev_speed: parseFloat(speed4dMatch[2]),
+                                                    time_sec: parseInt(speed4dMatch[3], 10),
+                                                    comment: commentText,
+                                                    entry_time: tradeTime,
+                                                    exit_time: tradeTime,
+                                                    trade_type: tradeType
+                                                });
+                                            } else if (speedMatch) {
+                                                trades.push({ 
+                                                    profit, 
+                                                    speed: parseFloat(speedMatch[1]), 
+                                                    comment: commentText,
+                                                    entry_time: tradeTime,
+                                                    exit_time: tradeTime,
+                                                    trade_type: tradeType
+                                                });
+                                            }
                                         }
                                     }
                                 }
@@ -429,129 +932,1072 @@
             const wins = trades.filter(t => t.profit > 0).length;
             const winRate = ((wins / total) * 100).toFixed(2);
 
+            // Time & Sequence Variables
+            let totalWinDuration = 0;
+            let totalLossDuration = 0;
+            let winCount = 0;
+            let lossCount = 0;
+
+            const hourBuckets = {}; // For time of day
+            for (let i = 0; i < 24; i++) hourBuckets[i] = { profit: 0, count: 0, trades: [] };
+
+            let longWins = 0, longLosses = 0;
+            let shortWins = 0, shortLosses = 0;
+            let longProfit = 0, shortProfit = 0;
+
+            let currentStreakType = null; // 'win' or 'loss'
+            let currentStreakLength = 0;
+            const streakCounts = { win: {}, loss: {} }; // e.g. streakCounts.win[3] = number of 3-win streaks
+
+            const durationData = []; // for scatter plot
+
             // 2. Group by speed ranges (bucket size of 10)
+            let minSpeedFilter = trades.length > 0 ? Math.min(...trades.map(t => t.speed)) : 0;
+            let maxSpeedFilter = trades.length > 0 ? Math.max(...trades.map(t => t.speed)) : 0;
+            let minBucket = Math.floor(minSpeedFilter / 10) * 10;
+            let maxBucket = Math.floor(maxSpeedFilter / 10) * 10;
+            
             const speedBuckets = {};
+            for (let b = minBucket; b <= maxBucket; b += 10) {
+                speedBuckets[b] = { profit: 0, count: 0, wins: 0, trades: [] };
+            }
+            
             trades.forEach(t => {
                 const bucket = Math.floor(t.speed / 10) * 10; 
-                const bucketLabel = `${bucket} to ${bucket + 9}`;
-                if (!speedBuckets[bucketLabel]) {
-                    speedBuckets[bucketLabel] = { profit: 0, count: 0, wins: 0 };
+                speedBuckets[bucket].profit += t.profit;
+                speedBuckets[bucket].count += 1;
+                speedBuckets[bucket].trades.push(t);
+                
+                const isWin = t.profit > 0;
+                if (isWin) speedBuckets[bucket].wins += 1;
+
+                // Duration Calculation
+                let durationMinutes = 0;
+                let entryHour = null;
+                if (t.entry_time && t.exit_time) {
+                    const entryObj = new Date(t.entry_time.replace(/\./g, '/'));
+                    const exitObj = new Date(t.exit_time.replace(/\./g, '/'));
+                    if (!isNaN(entryObj) && !isNaN(exitObj)) {
+                        durationMinutes = (exitObj - entryObj) / 60000;
+                        if (durationMinutes >= 0) {
+                            durationData.push({ x: durationMinutes, y: t.profit, comment: t.comment });
+                            if (isWin) { totalWinDuration += durationMinutes; winCount++; }
+                            else { totalLossDuration += durationMinutes; lossCount++; }
+                        }
+                        
+                        entryHour = entryObj.getHours();
+                        if (entryHour >= 0 && entryHour < 24) {
+                            hourBuckets[entryHour].profit += t.profit;
+                            hourBuckets[entryHour].count += 1;
+                            hourBuckets[entryHour].trades.push(t);
+                        }
+                    }
                 }
-                speedBuckets[bucketLabel].profit += t.profit;
-                speedBuckets[bucketLabel].count += 1;
-                if (t.profit > 0) speedBuckets[bucketLabel].wins += 1;
+
+                // Direction logic
+                if (t.trade_type === 'buy') {
+                    longProfit += t.profit;
+                    if (isWin) longWins++; else longLosses++;
+                } else if (t.trade_type === 'sell') {
+                    shortProfit += t.profit;
+                    if (isWin) shortWins++; else shortLosses++;
+                }
+
+                // Streak logic
+                const tType = isWin ? 'win' : 'loss';
+                if (currentStreakType === tType) {
+                    currentStreakLength++;
+                } else {
+                    if (currentStreakType !== null && currentStreakLength > 0) {
+                        streakCounts[currentStreakType][currentStreakLength] = (streakCounts[currentStreakType][currentStreakLength] || 0) + 1;
+                    }
+                    currentStreakType = tType;
+                    currentStreakLength = 1;
+                }
             });
 
-            let bestBucket = null;
-            let worstBucket = null;
-            let bestProfit = -Infinity;
-            let worstProfit = Infinity;
-
-            for (const [label, data] of Object.entries(speedBuckets)) {
-                if (data.profit > bestProfit) {
-                    bestProfit = data.profit;
-                    bestBucket = label;
-                }
-                if (data.profit < worstProfit) {
-                    worstProfit = data.profit;
-                    worstBucket = label;
-                }
+            // Final streak record
+            if (currentStreakType !== null && currentStreakLength > 0) {
+                streakCounts[currentStreakType][currentStreakLength] = (streakCounts[currentStreakType][currentStreakLength] || 0) + 1;
             }
 
+            let bestBucket = null, worstBucket = null;
+            let bestProfit = -Infinity, worstProfit = Infinity;
+            for (const [bucket, data] of Object.entries(speedBuckets)) {
+                if (data.count === 0) continue;
+                if (data.profit > bestProfit) { bestProfit = data.profit; bestBucket = `${bucket} to ${parseInt(bucket)+9}`; }
+                if (data.profit < worstProfit) { worstProfit = data.profit; worstBucket = `${bucket} to ${parseInt(bucket)+9}`; }
+            }
+
+            let bestHour = null, worstHour = null;
+            let bestHourProfit = -Infinity, worstHourProfit = Infinity;
+            for (let i = 0; i < 24; i++) {
+                if (hourBuckets[i].profit > bestHourProfit) { bestHourProfit = hourBuckets[i].profit; bestHour = i; }
+                if (hourBuckets[i].profit < worstHourProfit) { worstHourProfit = hourBuckets[i].profit; worstHour = i; }
+            }
+
+            // UI Speed Tab
             document.getElementById('totalTrades').textContent = total;
             document.getElementById('winRate').textContent = `${winRate}%`;
+
+            const genNetsEl = document.getElementById('generalNets');
+            if (genNetsEl) {
+                const lClassGen = longProfit >= 0 ? 'positive' : 'negative';
+                const sClassGen = shortProfit >= 0 ? 'positive' : 'negative';
+                const lSignGen = longProfit >= 0 ? '+$' : '-$';
+                const sSignGen = shortProfit >= 0 ? '+$' : '-$';
+                genNetsEl.innerHTML = `
+                    <span class="${lClassGen}" style="font-size: 1.1rem; font-weight: 700;">L: ${lSignGen}${Math.abs(longProfit).toFixed(2)}</span>
+                    <span class="${sClassGen}" style="font-size: 1.1rem; font-weight: 700;">S: ${sSignGen}${Math.abs(shortProfit).toFixed(2)}</span>
+                `;
+            }
+
             document.getElementById('bestSpeed').textContent = bestBucket ? `${bestBucket} pt/s` : '-';
             document.getElementById('worstSpeed').textContent = worstBucket ? `${worstBucket} pt/s` : '-';
 
-            renderCharts(trades, speedBuckets);
+            // UI Time Tab
+            document.getElementById('avgWinDuration').textContent = winCount > 0 ? `${(totalWinDuration/winCount).toFixed(0)} min` : '-';
+            document.getElementById('avgLossDuration').textContent = lossCount > 0 ? `${(totalLossDuration/lossCount).toFixed(0)} min` : '-';
+            document.getElementById('bestHour').textContent = bestHour !== null ? `${String(bestHour).padStart(2, '0')}:00` : '-';
+            document.getElementById('worstHour').textContent = worstHour !== null ? `${String(worstHour).padStart(2, '0')}:00` : '-';
+
+            // UI Sequence Tab
+            const totalLong = longWins + longLosses;
+            const totalShort = shortWins + shortLosses;
+            document.getElementById('longWinRate').textContent = totalLong > 0 ? `${((longWins/totalLong)*100).toFixed(1)}%` : '-';
+            document.getElementById('shortWinRate').textContent = totalShort > 0 ? `${((shortWins/totalShort)*100).toFixed(1)}%` : '-';
+            
+            const lProfEl = document.getElementById('longProfit');
+            lProfEl.textContent = `$${longProfit.toFixed(2)}`;
+            lProfEl.className = 'stat-value ' + (longProfit >= 0 ? 'positive' : 'negative');
+
+            const sProfEl = document.getElementById('shortProfit');
+            sProfEl.textContent = `$${shortProfit.toFixed(2)}`;
+            sProfEl.className = 'stat-value ' + (shortProfit >= 0 ? 'positive' : 'negative');
+
+            renderCharts(trades, speedBuckets, durationData, hourBuckets, streakCounts, longProfit, shortProfit);
+            renderCalendar(trades);
         }
 
-        function renderCharts(trades, speedBuckets) {
-            // Setup Scatter Chart
-            const scatterData = trades.map(t => ({
-                x: t.speed,
-                y: t.profit,
-                comment: t.comment
-            }));
+        let durationScatterChartInstance = null;
+        let timeOfDayBarChartInstance = null;
+        let directionPieChartInstance = null;
+        let streakBarChartInstance = null;
 
-            // Color green for win, red for loss
-            const pointColors = trades.map(t => t.profit >= 0 ? 'rgba(16, 185, 129, 0.6)' : 'rgba(239, 68, 68, 0.6)');
-
-            if (scatterChartInstance) scatterChartInstance.destroy();
-            const ctxScatter = document.getElementById('scatterChart').getContext('2d');
-            
+        function renderCharts(trades, speedBuckets, durationData, hourBuckets, streakCounts, longProfit, shortProfit) {
             Chart.defaults.color = '#94a3b8';
             Chart.defaults.font.family = 'Inter';
 
-            scatterChartInstance = new Chart(ctxScatter, {
+            // 0. Plotly 4D Chart (if data exists)
+            const trades4d = trades.filter(t => t.prev_speed !== undefined && t.time_sec !== undefined);
+            if (trades4d.length > 0) {
+                document.getElementById('chart4d-wrapper').style.display = 'block';
+                
+                const prev_speeds = [];
+                const curr_speeds = [];
+                const time_opens = [];
+                const net_results = [];
+                const texts = [];
+                
+                trades4d.forEach(t => {
+                    prev_speeds.push(t.prev_speed);
+                    curr_speeds.push(t.speed);
+                    time_opens.push(t.time_sec);
+                    net_results.push(t.profit);
+                    texts.push(`${t.trade_type || 'Trade'}<br>Net: $${t.profit.toFixed(2)}<br>Prev: ${t.prev_speed.toFixed(2)}<br>Curr: ${t.speed.toFixed(2)}<br>Secs: ${t.time_sec}`);
+                });
+
+                const trace = {
+                    x: curr_speeds,
+                    y: prev_speeds,
+                    z: time_opens,
+                    mode: 'markers',
+                    marker: {
+                        size: 6,
+                        color: net_results,
+                        colorscale: [
+                            [0, 'rgb(239, 68, 68)'],       // Red for loss
+                            [0.5, 'rgb(148, 163, 184)'],    // Slate/Gray for break-even
+                            [1, 'rgb(34, 197, 94)']         // Green for win
+                        ],
+                        cmin: Math.min(...net_results, -50),
+                        cmax: Math.max(...net_results, 50),
+                        colorbar: {
+                            title: 'Net Profit ($)',
+                            tickfont: {color: '#94a3b8'},
+                            titlefont: {color: '#f8fafc'}
+                        },
+                        opacity: 0.9,
+                        line: { width: 0.5, color: '#0f172a' }
+                    },
+                    text: texts,
+                    hoverinfo: 'x+y+z+text',
+                    type: 'scatter3d'
+                };
+
+                const layout = {
+                    paper_bgcolor: 'transparent',
+                    plot_bgcolor: 'transparent',
+                    font: { color: '#94a3b8', family: 'Inter, sans-serif' },
+                    scene: {
+                        camera: {
+                            eye: { x: 0, y: -2, z: 0.5 }
+                        },
+                        xaxis: { title: 'Curr Speed (pt/s)', backgroundcolor: 'rgba(30, 41, 59, 0.7)', gridcolor: '#334155' },
+                        yaxis: { title: 'Prev Speed (pt/s)', backgroundcolor: 'rgba(30, 41, 59, 0.7)', gridcolor: '#334155' },
+                        zaxis: { title: 'Time Since Open (s)', backgroundcolor: 'rgba(30, 41, 59, 0.7)', gridcolor: '#334155' },
+                        bgcolor: 'transparent'
+                    },
+                    margin: { l: 0, r: 0, b: 0, t: 0, pad: 0 }
+                };
+
+                Plotly.newPlot('chart4d', [trace], layout, { responsive: true, displayModeBar: true });
+
+                // -- 0B: Generate 3D & Heatmap Range Buckets --
+                document.getElementById('chart3d-profit-wrapper').style.display = 'block';
+                document.getElementById('chart-heatmap-wrapper').style.display = 'block';
+
+                const buckets3d = {};
+                const currVals = new Set();
+                const prevVals = new Set();
+
+                trades4d.forEach(t => {
+                    const currB = Math.floor(t.speed / 10) * 10;
+                    const prevB = Math.floor(t.prev_speed / 10) * 10;
+                    currVals.add(currB);
+                    prevVals.add(prevB);
+
+                    const key = `${currB}_${prevB}`;
+                    if (!buckets3d[key]) {
+                        buckets3d[key] = { profit: 0, count: 0, trades: [], currB, prevB };
+                    }
+                    buckets3d[key].profit += t.profit;
+                    buckets3d[key].count += 1;
+                    buckets3d[key].trades.push(t);
+                });
+
+                const sortedCurr = Array.from(currVals).sort((a,b)=>a-b);
+                const sortedPrev = Array.from(prevVals).sort((a,b)=>a-b);
+
+                // For 3D grouped scatter:
+                const x_scatter3d = [];
+                const y_scatter3d = [];
+                const z_scatter3d = [];
+                const texts_scatter3d = [];
+                const customdata_3d = [];
+                const sizes_3d = [];
+                const colors_3d = [];
+
+                Object.values(buckets3d).forEach(b => {
+                    x_scatter3d.push(b.currB + 5);  // center of bin
+                    y_scatter3d.push(b.prevB + 5);
+                    z_scatter3d.push(b.profit);
+                    colors_3d.push(b.profit);
+                    sizes_3d.push(Math.max(8, Math.min(30, 8 + Math.sqrt(b.count) * 2)));
+                    texts_scatter3d.push(`Curr: ${b.currB} to ${b.currB+9}<br>Prev: ${b.prevB} to ${b.prevB+9}<br>Net: $${b.profit.toFixed(2)}<br>Trades: ${b.count}`);
+                    customdata_3d.push(b);
+                });
+
+                const traceGroup3d = {
+                    x: x_scatter3d,
+                    y: y_scatter3d,
+                    z: z_scatter3d,
+                    mode: 'markers',
+                    marker: {
+                        size: sizes_3d,
+                        color: colors_3d,
+                        colorscale: [[0, 'rgb(239, 68, 68)'], [0.5, 'rgb(148, 163, 184)'], [1, 'rgb(34, 197, 94)']],
+                        cmin: Math.min(...colors_3d, -50),
+                        cmax: Math.max(...colors_3d, 50),
+                        colorbar: { title: 'Net Profit ($)', tickfont: {color: '#94a3b8'}, titlefont: {color: '#f8fafc'} },
+                        opacity: 0.9,
+                        line: { width: 1, color: '#0f172a' }
+                    },
+                    text: texts_scatter3d,
+                    hoverinfo: 'text',
+                    type: 'scatter3d',
+                    customdata: customdata_3d
+                };
+
+                const layoutGroup3d = {
+                    paper_bgcolor: 'transparent',
+                    plot_bgcolor: 'transparent',
+                    font: { color: '#94a3b8', family: 'Inter, sans-serif' },
+                    scene: {
+                        camera: { eye: { x: 0, y: -2, z: 0.5 } },
+                        xaxis: { title: 'Curr Speed Range', backgroundcolor: 'rgba(30, 41, 59, 0.7)', gridcolor: '#334155' },
+                        yaxis: { title: 'Prev Speed Range', backgroundcolor: 'rgba(30, 41, 59, 0.7)', gridcolor: '#334155' },
+                        zaxis: { title: 'Net Profit ($)', backgroundcolor: 'rgba(30, 41, 59, 0.7)', gridcolor: '#334155' },
+                        bgcolor: 'transparent'
+                    },
+                    margin: { l: 0, r: 0, b: 0, t: 0, pad: 0 }
+                };
+
+                Plotly.newPlot('chart3d-profit', [traceGroup3d], layoutGroup3d, { responsive: true, displayModeBar: false });
+
+                document.getElementById('chart3d-profit').on('plotly_click', function(data) {
+                    if(data.points.length > 0 && data.points[0].customdata) {
+                        const b = data.points[0].customdata;
+                        showBucketDetails(`Curr ${b.currB} to ${b.currB+9} / Prev ${b.prevB} to ${b.prevB+9}`, b.trades, 'Speed Matrix');
+                    }
+                });
+
+                // For Heatmap: Z is a 2D Array [prev][curr]
+                const z_heat = [];
+                const hover_heat = [];
+                const custom_heat = [];
+                for(let i=0; i<sortedPrev.length; i++) {
+                    const rowProfits = [];
+                    const rowHovers = [];
+                    const rowCustom = [];
+                    for(let j=0; j<sortedCurr.length; j++) {
+                        const key = `${sortedCurr[j]}_${sortedPrev[i]}`;
+                        if (buckets3d[key]) {
+                            rowProfits.push(buckets3d[key].profit);
+                            rowHovers.push(`Curr: ${sortedCurr[j]} to ${sortedCurr[j]+9}<br>Prev: ${sortedPrev[i]} to ${sortedPrev[i]+9}<br>Net: $${buckets3d[key].profit.toFixed(2)}<br>Trades: ${buckets3d[key].count}`);
+                            rowCustom.push(buckets3d[key]);
+                        } else {
+                            rowProfits.push(null); // transparent
+                            rowHovers.push('');
+                            rowCustom.push(null);
+                        }
+                    }
+                    z_heat.push(rowProfits);
+                    hover_heat.push(rowHovers);
+                    custom_heat.push(rowCustom);
+                }
+
+                const traceHeat = {
+                    x: sortedCurr.map(c => `${c} to ${c+9}`),
+                    y: sortedPrev.map(p => `${p} to ${p+9}`),
+                    z: z_heat,
+                    text: hover_heat,
+                    hoverinfo: 'text',
+                    type: 'heatmap',
+                    customdata: custom_heat,
+                    colorscale: [[0, 'rgb(239, 68, 68)'], [0.5, 'rgb(148, 163, 184)'], [1, 'rgb(34, 197, 94)']],
+                    zmid: 0,
+                    zmin: Math.min(...colors_3d.length ? colors_3d : [0], -50),
+                    zmax: Math.max(...colors_3d.length ? colors_3d : [0], 50),
+                    colorbar: { title: 'Net Profit ($)', tickfont: {color: '#94a3b8'}, titlefont: {color: '#f8fafc'} }
+                };
+
+                const layoutHeat = {
+                    paper_bgcolor: 'transparent',
+                    plot_bgcolor: 'transparent',
+                    font: { color: '#94a3b8', family: 'Inter, sans-serif' },
+                    xaxis: { title: 'Current Speed Group (pt/s)', gridcolor: '#334155' },
+                    yaxis: { title: 'Previous Speed Group (pt/s)', gridcolor: '#334155' },
+                    margin: { l: 80, r: 0, b: 60, t: 20, pad: 0 }
+                };
+
+                Plotly.newPlot('chart-heatmap', [traceHeat], layoutHeat, { responsive: true, displayModeBar: false });
+
+                document.getElementById('chart-heatmap').on('plotly_click', function(data) {
+                    if(data.points.length > 0 && data.points[0].customdata) {
+                        const b = data.points[0].customdata;
+                        showBucketDetails(`Curr ${b.currB} to ${b.currB+9} / Prev ${b.prevB} to ${b.prevB+9}`, b.trades, 'Speed Matrix');
+                    }
+                });
+
+            } else {
+                document.getElementById('chart4d-wrapper').style.display = 'none';
+                document.getElementById('chart3d-profit-wrapper').style.display = 'none';
+                document.getElementById('chart-heatmap-wrapper').style.display = 'none';
+            }
+
+            // Setup Axis Bounds for perfect vertical alignment
+            let minSpeed = trades.length > 0 ? Math.min(...trades.map(t => t.speed)) : 0;
+            let maxSpeed = trades.length > 0 ? Math.max(...trades.map(t => t.speed)) : 0;
+            let sharedMinX = Math.floor(minSpeed / 10) * 10 - 10;
+            let sharedMaxX = Math.ceil(maxSpeed / 10) * 10 + 10;
+
+            // 1. Speed Scatter Chart
+            const scatterData = trades.map(t => ({ x: t.speed, y: t.profit, comment: t.comment }));
+            const pointColors = trades.map(t => t.profit >= 0 ? 'rgba(16, 185, 129, 0.6)' : 'rgba(239, 68, 68, 0.6)');
+
+            if (scatterChartInstance) scatterChartInstance.destroy();
+            scatterChartInstance = new Chart(document.getElementById('scatterChart').getContext('2d'), {
                 type: 'scatter',
-                data: {
-                    datasets: [{
-                        label: 'Trades',
-                        data: scatterData,
-                        backgroundColor: pointColors,
-                        pointRadius: 6,
-                        pointHoverRadius: 8
-                    }]
+                data: { datasets: [{ label: 'Trades', data: scatterData, backgroundColor: pointColors, pointRadius: 5 }] },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: { tooltip: { callbacks: { label: c => `Speed: ${c.raw.x}, Profit: ${c.raw.y} | ${c.raw.comment}` } } },
+                    scales: {
+                        x: { 
+                            type: 'linear',
+                            min: sharedMinX,
+                            max: sharedMaxX,
+                            ticks: { stepSize: 10 },
+                            title: { display: true, text: 'Speed at Entry (pt/s)' }, 
+                            grid: { color: 'rgba(255,255,255,0.05)' },
+                            offset: false
+                        },
+                        y: { 
+                            afterFit: function(axis) { axis.width = 65; },
+                            title: { display: true, text: 'Profit' }, 
+                            grid: { color: 'rgba(255,255,255,0.05)' } 
+                        }
+                    }
+                }
+            });
+
+            // 2. Speed Bar Chart (aligned linear axis)
+            const bucketsArray = Object.keys(speedBuckets).map(Number).sort((a,b) => a - b);
+            const barDataPoints = bucketsArray.map(b => ({ x: b + 5, y: speedBuckets[b].profit }));
+            const barColorsLinear = bucketsArray.map(b => speedBuckets[b].profit >= 0 ? 'rgba(16, 185, 129, 0.8)' : 'rgba(239, 68, 68, 0.8)');
+            const barTradesList = bucketsArray.map(b => speedBuckets[b].trades);
+
+            if (barChartInstance) barChartInstance.destroy();
+            barChartInstance = new Chart(document.getElementById('barChart').getContext('2d'), {
+                type: 'bar',
+                data: { 
+                    datasets: [{ 
+                        label: 'Net Profit', 
+                        data: barDataPoints, 
+                        backgroundColor: barColorsLinear, 
+                        borderRadius: 4,
+                        barPercentage: 0.9,
+                        categoryPercentage: 1.0,
+                        tradesData: barTradesList,
+                        bucketStart: bucketsArray
+                    }] 
                 },
                 options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
+                    responsive: true, maintainAspectRatio: false,
+                    onHover: (event, chartElement) => {
+                        if (chartElement.length > 0 && chartElement[0].datasetIndex !== undefined) {
+                            const dataIdx = chartElement[0].index;
+                            const tCount = barChartInstance.data.datasets[0].tradesData[dataIdx].length;
+                            event.native.target.style.cursor = tCount > 0 ? 'pointer' : 'default';
+                        } else {
+                            event.native.target.style.cursor = 'default';
+                        }
+                    },
+                    onClick: (event, activeElements) => {
+                        if (activeElements.length > 0) {
+                            const dataIndex = activeElements[0].index;
+                            const startBucket = barChartInstance.data.datasets[0].bucketStart[dataIndex];
+                            const bucketTrades = barChartInstance.data.datasets[0].tradesData[dataIndex];
+                            if (bucketTrades && bucketTrades.length > 0) {
+                                showBucketDetails(`${startBucket} to ${startBucket + 9}`, bucketTrades);
+                            }
+                        }
+                    },
+                    plugins: { 
+                        tooltip: { 
+                            callbacks: { 
+                                title: ctx => {
+                                    const start = ctx[0].dataset.bucketStart[ctx[0].dataIndex];
+                                    return `${start} to ${start+9} pt/s`;
+                                },
+                                label: ctx => {
+                                    const prof = ctx.raw.y;
+                                    const counts = ctx.dataset.tradesData[ctx.dataIndex].length;
+                                    return `Net: $${prof.toFixed(2)} (${counts} trades)`;
+                                }
+                            }
+                        } 
+                    },
+                    scales: {
+                        x: { 
+                            type: 'linear',
+                            min: sharedMinX,
+                            max: sharedMaxX,
+                            ticks: { stepSize: 10 },
+                            title: { display: true, text: 'Speed Group (pt/s)' },
+                            grid: { color: 'rgba(255,255,255,0.05)' },
+                            offset: false
+                        },
+                        y: { 
+                            afterFit: function(axis) { axis.width = 65; },
+                            title: { display: true, text: 'Net Profit' },
+                            grid: { color: 'rgba(255,255,255,0.05)' }
+                        }
+                    }
+                }
+            });
+
+            // 3. Duration Scatter Chart
+            const durPointColors = durationData.map(d => d.y >= 0 ? 'rgba(16, 185, 129, 0.6)' : 'rgba(239, 68, 68, 0.6)');
+            if (durationScatterChartInstance) durationScatterChartInstance.destroy();
+            durationScatterChartInstance = new Chart(document.getElementById('durationScatterChart').getContext('2d'), {
+                type: 'scatter',
+                data: { datasets: [{ label: 'Trades', data: durationData, backgroundColor: durPointColors, pointRadius: 5 }] },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: { tooltip: { callbacks: { label: c => `Duration: ${c.raw.x.toFixed(1)}m, Profit: ${c.raw.y} | ${c.raw.comment}` } } },
+                    scales: {
+                        x: { title: { display: true, text: 'Duration (Minutes)' }, grid: { color: 'rgba(255,255,255,0.05)' } },
+                        y: { title: { display: true, text: 'Profit' }, grid: { color: 'rgba(255,255,255,0.05)' } }
+                    }
+                }
+            });
+
+            // 4. Time of Day Bar Chart
+            const hourLabels = Object.keys(hourBuckets).map(h => `${String(h).padStart(2,'0')}:00`);
+            const hourProfits = Object.values(hourBuckets).map(h => h.profit);
+            const hourCounts = Object.values(hourBuckets).map(h => h.count);
+            const hourColors = hourProfits.map(p => p >= 0 ? 'rgba(16, 185, 129, 0.8)' : 'rgba(239, 68, 68, 0.8)');
+
+            const hourTrades = Object.values(hourBuckets).map(h => h.trades);
+
+            if (timeOfDayBarChartInstance) timeOfDayBarChartInstance.destroy();
+            timeOfDayBarChartInstance = new Chart(document.getElementById('timeOfDayBarChart').getContext('2d'), {
+                type: 'bar',
+                data: { 
+                    labels: hourLabels, 
+                    datasets: [{ 
+                        label: 'Net Profit', 
+                        data: hourProfits, 
+                        backgroundColor: hourColors, 
+                        borderRadius: 4,
+                        counts: hourCounts, // Custom property for tooltip
+                        tradesData: hourTrades
+                    }] 
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    onHover: (event, chartElement) => {
+                        event.native.target.style.cursor = chartElement.length ? 'pointer' : 'default';
+                    },
+                    onClick: (event, activeElements) => {
+                        if (activeElements.length > 0) {
+                            const dataIndex = activeElements[0].index;
+                            const hourLabel = hourLabels[dataIndex];
+                            const bucketTrades = hourTrades[dataIndex];
+                            showBucketDetails(hourLabel, bucketTrades, 'Hour');
+                        } else {
+                            hideBucketDetails();
+                        }
+                    },
                     plugins: {
                         tooltip: {
                             callbacks: {
-                                label: function(context) {
-                                    const pt = context.raw;
-                                    return `Speed: ${pt.x}, Profit: ${pt.y} | ${pt.comment}`;
+                                label: function(context) {      
+                                    const profit = context.raw.toFixed(2);
+                                    const count = context.dataset.counts[context.dataIndex];
+                                    return `Net Profit: $${profit} (${count} Trades)`;
                                 }
                             }
                         }
                     },
-                    scales: {
-                        x: {
-                            title: { display: true, text: 'Speed at Entry (pt/s)' },
-                            grid: { color: 'rgba(255,255,255,0.05)' }
-                        },
-                        y: {
-                            title: { display: true, text: 'Profit' },
-                            grid: { color: 'rgba(255,255,255,0.05)' }
-                        }
-                    }
+                    scales: { y: { grid: { color: 'rgba(255,255,255,0.05)' } }, x: { grid: { display: false } } }
                 }
             });
 
-            // Setup Bar Chart
-            const labels = Object.keys(speedBuckets).sort((a, b) => parseInt(a) - parseInt(b));
-            const profits = labels.map(l => speedBuckets[l].profit);
-            const barColors = profits.map(p => p >= 0 ? 'rgba(16, 185, 129, 0.8)' : 'rgba(239, 68, 68, 0.8)');
-
-            if (barChartInstance) barChartInstance.destroy();
-            const ctxBar = document.getElementById('barChart').getContext('2d');
-            
-            barChartInstance = new Chart(ctxBar, {
-                type: 'bar',
+            // 5. Direction Pie Chart
+            if (directionPieChartInstance) directionPieChartInstance.destroy();
+            directionPieChartInstance = new Chart(document.getElementById('directionPieChart').getContext('2d'), {
+                type: 'doughnut',
                 data: {
-                    labels: labels,
+                    labels: ['Long Profit', 'Short Profit'],
                     datasets: [{
-                        label: 'Net Profit',
-                        data: profits,
-                        backgroundColor: barColors,
-                        borderRadius: 4
+                        data: [Math.max(0, longProfit), Math.max(0, shortProfit)], // Don't show negative in pie simply
+                        backgroundColor: ['rgba(59, 130, 246, 0.8)', 'rgba(167, 139, 250, 0.8)'],
+                        borderColor: 'transparent'
                     }]
                 },
                 options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    scales: {
-                        y: {
-                            grid: { color: 'rgba(255,255,255,0.05)' }
-                        },
-                        x: {
-                            grid: { display: false }
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: {
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {      
+                                    // Hack to show actual profit in tooltip even if negative was scrubbed
+                                    return context.dataIndex === 0 ? `Long: $${longProfit.toFixed(2)}` : `Short: $${shortProfit.toFixed(2)}`;
+                                }
+                            }
                         }
                     }
                 }
             });
+
+            // 6. Streak Bar Chart
+            const streakLabels = new Set([...Object.keys(streakCounts.win), ...Object.keys(streakCounts.loss)]);
+            const sortedStreakLabels = Array.from(streakLabels).map(Number).sort((a, b) => a - b);
+            
+            const winStreakData = sortedStreakLabels.map(l => streakCounts.win[l] || 0);
+            const lossStreakData = sortedStreakLabels.map(l => streakCounts.loss[l] || 0);
+
+            if (streakBarChartInstance) streakBarChartInstance.destroy();
+            streakBarChartInstance = new Chart(document.getElementById('streakBarChart').getContext('2d'), {
+                type: 'bar',
+                data: {
+                    labels: sortedStreakLabels.map(l => `${l} in a row`),
+                    datasets: [
+                        { label: 'Winning Streaks', data: winStreakData, backgroundColor: 'rgba(16, 185, 129, 0.8)' },
+                        { label: 'Losing Streaks', data: lossStreakData, backgroundColor: 'rgba(239, 68, 68, 0.8)' }
+                    ]
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    scales: { y: { grid: { color: 'rgba(255,255,255,0.05)' } }, x: { grid: { display: false } } }
+                }
+            });
+        }
+
+        function renderCalendar(trades) {
+            const container = document.getElementById('calendar-container');
+            container.innerHTML = '';
+            
+            const dailyData = {};
+            
+            trades.forEach(t => {
+                if (!t.exit_time || t.exit_time === '-') return;
+                const match = t.exit_time.match(/^(\d{4})\.(\d{2})\.(\d{2})/);
+                if (match) {
+                    const year = parseInt(match[1]);
+                    const month = parseInt(match[2]);
+                    const day = parseInt(match[3]);
+                    const dateObj = new Date(year, month - 1, day);
+                    // Filter out weekends (0 = Sunday, 6 = Saturday)
+                    if (dateObj.getDay() !== 0 && dateObj.getDay() !== 6) {
+                        const dateStr = `${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+                        if (!dailyData[dateStr]) {
+                            dailyData[dateStr] = { profit: 0, trades: 0, wins: 0, losses: 0 };
+                        }
+                        dailyData[dateStr].profit += t.profit;
+                        dailyData[dateStr].trades += 1;
+                        if (t.profit > 0) dailyData[dateStr].wins += 1;
+                        if (t.profit <= 0) dailyData[dateStr].losses += 1;
+                    }
+                }
+            });
+            
+            
+            // Build chronologically sorted list of trading days to calculate recovery periods
+            const chronologicalDates = Object.keys(dailyData).sort((a,b) => a.localeCompare(b));
+            const recoveryData = {}; // maps losing date string to { daysToRecover, recovered }
+            
+            for (let i = 0; i < chronologicalDates.length; i++) {
+                const dateStr = chronologicalDates[i];
+                const profit = dailyData[dateStr].profit;
+                
+                if (profit < 0) {
+                    let deficit = Math.abs(profit);
+                    let daysCount = 0;
+                    let recovered = false;
+                    
+                    for (let j = i + 1; j < chronologicalDates.length; j++) {
+                        const nextDateStr = chronologicalDates[j];
+                        const nextProfit = dailyData[nextDateStr].profit;
+                        
+                        daysCount++;
+                        
+                        // We strictly count following profitable days towards recovery
+                        if (nextProfit > 0) {
+                            deficit -= nextProfit;
+                            if (deficit <= 0) {
+                                recovered = true;
+                                break;
+                            }
+                        }
+                    }
+                    
+                    recoveryData[dateStr] = { daysToRecover: daysCount, recovered: recovered };
+                }
+            }
+
+            const months = {};
+            const monthSummaries = {};
+            Object.keys(dailyData).forEach(dateStr => {
+                const monthStr = dateStr.substring(0, 7);
+                if (!months[monthStr]) {
+                    months[monthStr] = {};
+                    monthSummaries[monthStr] = { profit: 0, trades: 0, wins: 0, losses: 0 };
+                }
+                months[monthStr][dateStr] = dailyData[dateStr];
+                
+                // Aggregate into month summary
+                const data = dailyData[dateStr];
+                monthSummaries[monthStr].profit += data.profit;
+                monthSummaries[monthStr].trades += data.trades;
+                monthSummaries[monthStr].wins += data.wins;
+                monthSummaries[monthStr].losses += data.losses;
+            });
+            
+            const sortedMonths = Object.keys(months).sort((a,b) => b.localeCompare(a)); // Newest first
+            
+            if (sortedMonths.length === 0) {
+                container.innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 2rem;">No valid trading dates found to build calendar.</div>';
+                return;
+            }
+            
+            const monthNamesShort = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+            const dayNames = ["Mon", "Tue", "Wed", "Thu", "Fri"];
+            
+            const mainDiv = document.createElement('div');
+            mainDiv.className = 'calendar-month'; // Use the same block style
+            
+            let html = `<div class="calendar-month-title">Daily Net Profits</div>`;
+            html += `<div class="calendar-grid">`;
+            
+            // Empty top-left cell for the month column header
+            html += `<div></div>`; 
+            
+            dayNames.forEach(day => {
+                html += `<div class="calendar-day-header">${day}</div>`;
+            });
+            
+            sortedMonths.forEach((monthStr, mIndex) => {
+                const [year, month] = monthStr.split('-');
+                const monthIdx = parseInt(month) - 1;
+                
+                // Track weeks dynamically
+                const firstDay = new Date(year, monthIdx, 1).getDay();
+                const daysInMonth = new Date(year, parseInt(month), 0).getDate();
+                
+                // Array of weeks, each week is an array of 5 days (Mon-Fri)
+                let weeks = [];
+                let currentWeek = [null, null, null, null, null];
+                
+                for (let i = 1; i <= daysInMonth; i++) {
+                    const currentDay = new Date(year, monthIdx, i).getDay();
+                    
+                    if (currentDay !== 0 && currentDay !== 6) {
+                        // Mon is 1 -> index 0, Fri is 5 -> index 4
+                        const wkIndex = currentDay - 1; 
+                        
+                        const dateStr = `${year}-${month}-${String(i).padStart(2, '0')}`;
+                        const dayData = months[monthStr][dateStr]; // undefined if no trades
+                        
+                        // Calculate Day of Year (1-365)
+                        const start = new Date(year, 0, 0);
+                        const diff = (new Date(year, monthIdx, i) - start) + ((start.getTimezoneOffset() - new Date(year, monthIdx, i).getTimezoneOffset()) * 60 * 1000);
+                        const oneDay = 1000 * 60 * 60 * 24;
+                        const dayOfYear = Math.floor(diff / oneDay);
+                        
+                        currentWeek[wkIndex] = {
+                            dateStr: dateStr,
+                            dayObj: i,
+                            dayOfYear: dayOfYear,
+                            data: dayData
+                        };
+                        
+                        // Push week if it's Friday or end of month
+                        if (currentDay === 5 || i === daysInMonth) {
+                            weeks.push(currentWeek);
+                            currentWeek = [null, null, null, null, null];
+                        }
+                    } else if (currentDay === 6 && currentWeek.some(d => d !== null)) {
+                        // Push leftover days when we hit a Saturday
+                        weeks.push(currentWeek);
+                        currentWeek = [null, null, null, null, null];
+                    }
+                }
+                
+                // In case a week was left unpushed
+                if (currentWeek.some(d => d !== null)) {
+                    weeks.push(currentWeek);
+                }
+                
+                // Optionally add a top margin/separator if it is not the first month and we want clear separation
+                const marginTopStyle = mIndex > 0 ? 'margin-top: 1rem;' : '';
+
+                // Generate Monthly Summary HTML
+                const mSum = monthSummaries[monthStr];
+                let monthSummaryHtml = '';
+                if (mSum) {
+                    const mSign = mSum.profit > 0 ? '+$' : (mSum.profit < 0 ? '-$' : '$');
+                    const mVal = Math.abs(mSum.profit).toFixed(2);
+                    const mCls = mSum.profit > 0 ? 'positive' : (mSum.profit < 0 ? 'negative' : 'neutral');
+                    monthSummaryHtml = `
+                        <div style="font-size: 0.65rem; color: var(--text-muted); margin-top: 0.5rem; line-height: 1.4;">
+                            Net: <span class="${mCls}" style="font-weight: 700;">${mSign}${mVal}</span><br>
+                            Trades: <span style="font-weight: 700;">${mSum.trades}</span><br>
+                            <span style="color:var(--success); font-weight: 600;">${mSum.wins}W</span>
+                            <span style="opacity: 0.5;">/</span>
+                            <span style="color:var(--danger); font-weight: 600;">${mSum.losses}L</span>
+                        </div>
+                    `;
+                }
+
+                // Render each week
+                weeks.forEach((wk, wIndex) => {
+                    // For the first week of a month, we display the month name, otherwise empty space
+                    const isFirstWeek = (wIndex === 0);
+                    const monthLabelContent = `<div style="font-size: 0.9rem; font-weight: bold; color: var(--text-main);">${monthNamesShort[monthIdx]}</div><div style="font-size: 0.7rem;">${year}</div>${monthSummaryHtml}`;
+                    const monthLabel = isFirstWeek ? monthLabelContent : '';
+                    
+                    html += `<div class="calendar-month-label" style="${marginTopStyle}">${monthLabel}</div>`;
+                    
+                    for (let d = 0; d < 5; d++) {
+                        const cell = wk[d];
+                        const cellStyle = marginTopStyle; // Apply same top margin to the days row to align with the month label
+                        
+                        if (cell) {
+                            const data = cell.data;
+                            if (data !== undefined) {
+                                const isProfit = data.profit > 0;
+                                const isLoss = data.profit < 0;
+                                const cls = isProfit ? 'profit' : (isLoss ? 'loss' : 'neutral');
+                                const sign = data.profit > 0 ? '+$' : (data.profit < 0 ? '-$' : '$');
+                                const val = Math.abs(data.profit).toFixed(2);
+                                
+                                let recoveryHtml = '';
+                                if (isLoss && recoveryData[cell.dateStr]) {
+                                    const rec = recoveryData[cell.dateStr];
+                                    if (rec.recovered) {
+                                        recoveryHtml = `<div class="recovery-pill recovered" style="margin-top: 0.25rem;">Rec in ${rec.daysToRecover}d</div>`;
+                                    } else {
+                                        recoveryHtml = `<div class="recovery-pill pending" style="margin-top: 0.25rem;">> ${rec.daysToRecover}d (Open)</div>`;
+                                    }
+                                }
+                                
+                                html += `
+                                    <div class="calendar-day ${cls}" style="${cellStyle}">
+                                        <div class="calendar-date">${cell.dayObj} <span class="calendar-doy" title="Day of the year">#${cell.dayOfYear}</span></div>
+                                        <div class="calendar-value">${sign}${val}</div>
+                                        <div style="font-size: 0.65rem; padding-top: 0.25rem; font-weight: 500; opacity: 0.9;">
+                                            <span style="color: rgba(255,255,255,0.8);">${data.trades} T:</span> 
+                                            <span style="color:var(--success);">${data.wins}</span><span style="opacity: 0.5;">/</span><span style="color:var(--danger);">${data.losses}</span>
+                                        </div>
+                                        ${recoveryHtml}
+                                    </div>
+                                `;
+                            } else {
+                                html += `
+                                    <div class="calendar-day neutral" style="opacity: 0.3; ${cellStyle}">
+                                        <div class="calendar-date">${cell.dayObj} <span class="calendar-doy" title="Day of the year">#${cell.dayOfYear}</span></div>
+                                        <div class="calendar-value">-</div>
+                                    </div>
+                                `;
+                            }
+                        } else {
+                            html += `<div class="calendar-day empty" style="${cellStyle}"></div>`;
+                        }
+                    }
+                });
+                
+                // After each month, we can add a horizontal separator inside the grid
+                if (mIndex < sortedMonths.length - 1) {
+                    html += `<div style="grid-column: 1 / -1; height: 1px; background: rgba(255,255,255,0.05); margin: 0.5rem 0;"></div>`;
+                }
+
+            });
+            
+            html += `</div>`;
+            mainDiv.innerHTML = html;
+            container.appendChild(mainDiv);
+            
+            // Apply current zoom factor consistently
+            applyCalendarZoom(mainDiv);
+        }
+
+        function applyCalendarZoom(div) {
+            const isFullWidth = document.getElementById('calendar-container')?.classList.contains('full-width');
+            
+            if (currentCalendarZoom >= 1.0) {
+                div.style.transform = `scale(1)`;
+                // Instead of scale zooming out which breaks sticky, we just expand the width and let content flow
+                div.style.width = `calc(100% * ${currentCalendarZoom})`;
+                div.style.maxWidth = isFullWidth ? '100%' : `calc(800px * ${currentCalendarZoom})`;
+                div.style.fontSize = `${currentCalendarZoom}rem`; // Scale the text using rems
+            } else {
+                div.style.fontSize = `1rem`;
+                div.style.width = `calc(100% * (1 / ${currentCalendarZoom}))`;
+                div.style.maxWidth = isFullWidth ? 'none' : `calc(800px * (1 / ${currentCalendarZoom}))`;
+                div.style.transform = `scale(${currentCalendarZoom})`;
+                div.style.transformOrigin = `top left`;
+            }
+        }
+
+        function toggleFullWidth() {
+            const container = document.getElementById('calendar-container');
+            if (container) {
+                container.classList.toggle('full-width');
+                const btn = document.getElementById('fullWidthBtn');
+                if (btn) {
+                    if (container.classList.contains('full-width')) {
+                        btn.style.background = 'rgba(255, 255, 255, 0.1)';
+                        btn.style.borderColor = 'var(--text-main)';
+                    } else {
+                        btn.style.background = 'transparent';
+                        btn.style.borderColor = 'var(--border-color)';
+                    }
+                }
+                
+                // Re-apply zoom to recalculate max-width based on new full-width state
+                const monthDivs = document.querySelectorAll('.calendar-month');
+                monthDivs.forEach(div => {
+                    applyCalendarZoom(div);
+                });
+            }
+        }
+
+        function zoomCalendar(delta) {
+            currentCalendarZoom += delta;
+            // Bound the zoom between reasonably small (e.g. 0.3) and large (e.g. 2.5)
+            if (currentCalendarZoom < 0.3) currentCalendarZoom = 0.3;
+            if (currentCalendarZoom > 2.5) currentCalendarZoom = 2.5;
+            
+            const monthDivs = document.querySelectorAll('.calendar-month');
+            const container = document.getElementById('calendar-container');
+            
+            monthDivs.forEach(div => {
+                applyCalendarZoom(div);
+            });
+            
+            if (container) {
+                 if (currentCalendarZoom < 1.0) {
+                     const shrinkFactor = 1.0 - currentCalendarZoom;
+                     // Approximating total height loss to collapse gap
+                     const overlap = -1 * (300 * shrinkFactor); 
+                     container.style.gap = `${overlap}px`;
+                 } else {
+                     container.style.gap = `2rem`;
+                 }
+            }
+        }
+
+        function switchTab(tabId) {
+            // Hide bucket details when switching tabs
+            hideBucketDetails();
+            
+            // Update buttons
+            document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+            // Safely mark active tab button
+            if (window.event && window.event.currentTarget) {
+                window.event.currentTarget.classList.add('active');
+            } else if (window.event && window.event.target) {
+                window.event.target.classList.add('active');
+            } else {
+                // Fallback: finding button by onclick
+                const btns = document.querySelectorAll('.tab-btn');
+                for (let i = 0; i < btns.length; i++) {
+                    if (btns[i].getAttribute('onclick') && btns[i].getAttribute('onclick').includes(tabId)) {
+                        btns[i].classList.add('active');
+                        break;
+                    }
+                }
+            }
+
+            // Update content visibility
+            document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+            document.getElementById(tabId).classList.add('active');
+        }
+
+        // Global state for sorting
+        let currentBucketTrades = [];
+        let currentSortCol = 'entry_time';
+        let currentSortAsc = true;
+
+        function showBucketDetails(bucketLabel, trades, titlePrefix = 'Speed Group') {
+            document.getElementById('bucket-details-container').style.display = 'block';
+            document.getElementById('bucket-details-title').textContent = `Trades for ${titlePrefix}: ${bucketLabel}`;
+            
+            // Save trades globally for sorting
+            currentBucketTrades = trades;
+            
+            // Reset sort state to default
+            currentSortCol = 'entry_time';
+            currentSortAsc = true;
+            
+            renderBucketTable();
+            
+            // Scroll to the table softly
+            setTimeout(() => {
+                document.getElementById('bucket-details-container').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }, 50);
+        }
+        
+        function handleSort(col) {
+            if (currentSortCol === col) {
+                currentSortAsc = !currentSortAsc;
+            } else {
+                currentSortCol = col;
+                currentSortAsc = true;
+            }
+            renderBucketTable();
+        }
+
+        function renderBucketTable() {
+            const tbody = document.getElementById('bucket-details-body');
+            tbody.innerHTML = '';
+            
+            // Update sort indicators
+            const sortCols = ['entry_time', 'exit_time', 'trade_type', 'speed', 'profit'];
+            sortCols.forEach(c => {
+                const span = document.getElementById(`sort-${c}`);
+                if (span) {
+                    if (c === currentSortCol) {
+                        span.textContent = currentSortAsc ? '▲' : '▼';
+                    } else {
+                        span.textContent = '';
+                    }
+                }
+            });
+            
+            // Sort trades
+            const sortedTrades = [...currentBucketTrades].sort((a, b) => {
+                let valA = a[currentSortCol];
+                let valB = b[currentSortCol];
+                
+                // Handle missing values
+                if (valA === undefined || valA === null) valA = '';
+                if (valB === undefined || valB === null) valB = '';
+
+                let cmp = 0;
+                if (currentSortCol === 'speed' || currentSortCol === 'profit') {
+                     // Numeric comparison
+                     valA = parseFloat(valA) || 0;
+                     valB = parseFloat(valB) || 0;
+                     cmp = valA - valB;
+                } else if (currentSortCol === 'entry_time' || currentSortCol === 'exit_time') {
+                     // Date string comparison (YYYY.MM.DD HH:MM:SS)
+                     cmp = String(valA).localeCompare(String(valB));
+                } else {
+                     // Default string comparison
+                     cmp = String(valA).localeCompare(String(valB));
+                }
+                
+                return currentSortAsc ? cmp : -cmp;
+            });
+            
+            let longNet = 0;
+            let shortNet = 0;
+            
+            sortedTrades.forEach(t => {
+                if (t.trade_type === 'buy') longNet += t.profit;
+                else if (t.trade_type === 'sell') shortNet += t.profit;
+                
+                const tr = document.createElement('tr');
+                tr.style.borderBottom = '1px solid rgba(255, 255, 255, 0.05)';
+                tr.style.transition = 'background-color 0.2s';
+                tr.onmouseover = () => tr.style.backgroundColor = 'rgba(255, 255, 255, 0.05)';
+                tr.onmouseout = () => tr.style.backgroundColor = 'transparent';
+                
+                const profitClass = t.profit >= 0 ? 'positive' : 'negative';
+                const profitText = t.profit >= 0 ? `+$${t.profit.toFixed(2)}` : `-$${Math.abs(t.profit).toFixed(2)}`;
+                
+                tr.innerHTML = `
+                    <td style="padding: 0.75rem;">${t.entry_time || '-'}</td>
+                    <td style="padding: 0.75rem;">${t.exit_time || '-'}</td>
+                    <td style="padding: 0.75rem; text-transform: uppercase; font-size: 0.8rem; letter-spacing: 0.5px;">${t.trade_type || '-'}</td>
+                    <td style="padding: 0.75rem;">${t.speed !== undefined && t.speed !== null && t.speed !== '' ? Number(t.speed).toFixed(2) : '-'}</td>
+                    <td style="padding: 0.75rem; font-weight: 600;" class="${profitClass}">${profitText}</td>
+                    <td style="padding: 0.75rem; font-size: 0.85rem; color: var(--text-muted);">${t.comment || '-'}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+            
+            const summaryDiv = document.getElementById('bucket-details-summary');
+            if (summaryDiv) {
+                const lClass = longNet >= 0 ? 'positive' : 'negative';
+                const sClass = shortNet >= 0 ? 'positive' : 'negative';
+                const lSign = longNet >= 0 ? '+$' : '-$';
+                const sSign = shortNet >= 0 ? '+$' : '-$';
+                
+                summaryDiv.innerHTML = `
+                    <div style="color: var(--text-muted);">Longs: <strong class="${lClass}">${lSign}${Math.abs(longNet).toFixed(2)}</strong></div>
+                    <div style="color: var(--text-muted);">Shorts: <strong class="${sClass}">${sSign}${Math.abs(shortNet).toFixed(2)}</strong></div>
+                `;
+            }
+        }
+
+        function hideBucketDetails() {
+            document.getElementById('bucket-details-container').style.display = 'none';
         }
     </script>
 </body>

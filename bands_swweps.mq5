@@ -17,12 +17,18 @@ enum ENUM_TP_STRATEGY {
 enum ENUM_ENTRY_TIMING {
     ENTRY_IMMEDIATE = 0,    
     ENTRY_DECELERATION = 1,
-    ENTRY_DIRECTIONAL_STOP = 2
+    ENTRY_DIRECTIONAL_STOP = 2,
+    ENTRY_DIR_STOP_RELATIVE = 3
 };
 
 enum ENUM_TREND_FILTER {
     TREND_BB_SLOPE = 0, 
     TREND_ADX = 1       
+};
+
+enum ENUM_DYN_MEAN_MODE {
+    DYN_MEAN_ADX = 0,     // Scale via ADX Trend Strength
+    DYN_MEAN_RSI = 1      // Scale via RSI Momentum
 };
 
 enum ENUM_H1_MOMENTUM {
@@ -52,6 +58,10 @@ input double               Dir_Entry_Threshold = 1.0;   // [Dir Stop] Min speed 
 
 input string               __Speed_Filters__ = "=== 2a. Speed Guardrails ===";
 input string               AllowedSpeedRanges = "-1/-30,0/10,10/30"; // Allowed speed ranges (e.g. "-1/-30,0/10,10/30")
+input double               Dir_Relative_Ratio = 0.10;   // [Rel Dir Stop] Required opposite speed as % of reference bar speed (0.10 = 10%)
+input double               Dir_Relative_Min   = 2.00;   // [Rel Dir Stop] Absolute minimum opposite speed required
+input double               Dir_Relative_Time_Pct = 0.10; // [Rel Dir Stop] Use Prev Candle if Cur Candle age < 10% (0.10)
+input bool                 Show_Dir_Stop_Details = true; // [TOGGLE] Show detailed speed tracking for Directional Stop
 
 input string               __Indicators__ = "=== 3. Indicators (BB & ATR) ===";
 input int                  BB_Period = 20;
@@ -75,10 +85,12 @@ input ENUM_TREND_FILTER    Trend_Method = TREND_ADX;
 input int                  BBSlope_Lookback = 3;   
 input int                  ADX_Period = 14;        
 input double               ADX_Threshold = 25.0;   
+input bool                 ADX_Dir_From_Mean = true; // [TOGGLE] If using ADX, UP trend if price > Mean (ignores DI lines)
 input double               MeanZonePct = 0.10;     
 
 input string               __DynMeanZone__ = "=== 4b. Dynamic Mean Zone ===";
-input bool                 Use_Dynamic_Mean_Zone = true; // [TOGGLE] Stretch mean zone based on ADX trend strength
+input bool                 Use_Dynamic_Mean_Zone = true; // [TOGGLE] Stretch mean zone based on Trend/Momentum
+input ENUM_DYN_MEAN_MODE   Dyn_Mean_Mode = DYN_MEAN_RSI; // Dynamic Mean Scaling Method
 input double               MaxMeanZonePct = 0.15;        // Max allowed mean zone (0.15 = 30% of half-band area)
 
 // -----------------------------------------------------------------------
@@ -153,13 +165,21 @@ input int                  Ranging_ADX_Threshold = 20;       // ADX below this m
 
 input string               __Fib50_Zone__ = "=== 5c. Fibonacci 50% Zone ===";
 input bool                 Use_Fib50_Filter = true;          // [TOGGLE] Only buy in Discount (bottom 50%) / sell in Premium (top 50%)
+input bool                 Use_Fib38_Trending = true;        // [TOGGLE] Allow 38.2% entry if H1 Trend & Momentum are strong
 
 input string               __M1_Momentum__ = "=== 5d. M1 HH/LL Momentum Filter ===";
 input bool                 Use_M1_Momentum = true;        // [TOGGLE] Use M1 HH/LL Ratio Filter
 input int                  M1_Mom_Lookback = 50;          // Bars to count HH and LL
 input double               M1_Mom_Trend_Threshold = 65.0; // Ratio % above = Trending (block counter)
-input double               M1_Mom_Range_Threshold = 55.0; // Ratio % between 100-X and X = Ranging (bypass HTF)
+input double               M1_Mom_Range_Threshold = 55.0; // Ratio % between 100-X and X = Ranging state
+input bool                 M1_Mom_Bypass_HTF      = false; // [TOGGLE] If Ranging, also bypass High Term TF (H1) rules
 input bool                 M1_Mom_Bypass_MTF      = false; // [TOGGLE] If Ranging, also bypass Medium Term TF (M5) rules
+input bool                 M1_Mom_Allow_Neutral   = true;  // [TOGGLE] If Neutral (between Ranging and Trending), allow entries (avoids strong momentum against)
+input bool                 M1_Mom_Bypass_Extreme  = true;  // [TOGGLE] Bypass M1 extreme condition when there is strong momentum and price is near band
+input int                  M1_Mom_Bypass_Lookback = 5;     // Bars to look back for strong momentum for the extreme bypass
+input double               M1_Mom_Bypass_Near_Pct = 0.10;  // Allowed distance to M1 band for bypass (10% of full M1 band range)
+input int                  M1_Mom_Bypass_Prev_Bars = 5;    // Candles to measure BEFORE the big push onset
+input double               M1_Mom_Bypass_Multiplier = 5.0; // Min size ratio comparing big push vs previous bars
 input bool                 Show_Candle_Speeds     = true;  // [TOGGLE] Display historical Open-Close speeds on the M1 chart
 input int                  Candle_Speed_Lookback  = 1440;  // How many historical bars to draw Speed on (1440 = 1 day of M1)
 
@@ -169,10 +189,18 @@ input double               EqualThresholdATR = 0.2;
 input double               ClusterToleranceATR = 2.0; 
 input int                  MajorSwingCandles = 15; 
 
+input string               __BigMove_Bypass__   = "=== 6b. Big Move M1 Extreme Bypass ===";
+input bool                 Use_BigMove_Bypass   = true;     // [TOGGLE] Bypass M1 extreme after a big move
+input int                  BigMove_Lookback     = 20;       // Bars to look back for the big move
+input double               BigMove_ATR_Mult     = 3.0;      // Move must be > X times ATR
+input int                  BigMove_Max_Trades   = 2;        // Max bypass trades allowed per setup
+input double               BigMove_Near_Pct     = 0.10;     // Allow entry if price is within this % of the M1 band range
+
 input string               __DeepSweep__ = "=== 7. Deep Sweep Logic ===";
 input bool                 Use_Deep_Sweep = true;  // [TOGGLE] Require deeper sweeps for Major/EQ levels
 input int                  DeepSweep_MinBars = 30; 
 input double               DeepSweep_ATR = 1.0;    
+input bool                 DeepSweep_M1_Bypass_Disable = true; // [TOGGLE] Disable deep sweep requirement during M1 Big Push Bypass
 
 input string               __Clearance__ = "=== 8. Structural Clearance ===";
 input bool                 Use_Clearance_Filter = true; // [TOGGLE] Prevent buying into immediate resistance
@@ -186,6 +214,24 @@ input int                  MinsAfterNews = 60;
 input string               __SLTP__ = "=== 10. Stop Loss & Standard TP ===";
 input double               SL_ATR_Multiplier = 5.0;        
 input ENUM_TP_STRATEGY     TP_Type = TP_MEAN;
+
+enum ENUM_HTF_TARGET {
+    TARGET_M5_MEAN = 0,
+    TARGET_M5_OPP_BAND = 1,
+    TARGET_H1_MEAN = 2,
+    TARGET_H1_OPP_BAND = 3
+};
+enum ENUM_HTF_TP_MODE {
+    HTF_TP_DYNAMIC = 0,    // Dynamic Band Tracking (Real-time)
+    HTF_TP_STATIC  = 1,    // Static (Locked Entry Band +/- 1 ATR)
+    HTF_TP_RANGE_PCT = 2   // Target at % of Mean-to-Band Range
+};
+input string               __HTF_Target_Upgrade__ = "=== 9. HTF Target Upgrades (Med Term Position) ===";
+input bool                 Use_HTF_TP_Upgrade = true;              // [TOGGLE] Extend target if H1 RSI is extremely strong
+input ENUM_HTF_TARGET      HTF_Upgrade_Target = TARGET_H1_OPP_BAND; // Where to aim if upgraded
+input ENUM_HTF_TP_MODE     HTF_TP_Execution_Mode = HTF_TP_DYNAMIC; // HTF Target Execution Strategy
+input int                  HTF_TP_Range_Pct = 15;                  // [Range Pct Mode] Trigger area % near band
+input bool                 Bypass_Squeeze_Exit_On_HTF = true;      // [TOGGLE] Ignore M5/H1 squeeze exits if trade is upgraded TP level
 
 input string               __Momentum__ = "=== 11. Strong Momentum Hold ===";
 input bool                 Use_Momentum_Hold = true;       // [TOGGLE] Ignore standard TP if structure is in our favor          
@@ -248,6 +294,11 @@ int handle_ADX_H1;
 int handle_ADX_M5;
 int handle_ADX_Ranging;
 int handle_RSI_H1;     // NEW: H1 RSI indicator handle
+int handle_RSI_M5;     // NEW: M5 RSI indicator handle
+
+// Big Move State Tracking
+int bm_state = 0;         // 0=Neutral, 1=BigDown(WaitMid), 2=ArmedBuy, -1=BigUp(WaitMid), -2=ArmedSell
+int bm_trades_taken = 0;  // Count how many bypass trades have been executed
 int handle_Crawl_MA;
 
 double atr_m1[], atr_m5[], atr_h1[];
@@ -256,9 +307,11 @@ double hist_base_h1[];
 double hist_base_m5[]; 
 double adx_h1[1], plus_di_h1[1], minus_di_h1[1];
 double adx_m5[1], plus_di_m5[1], minus_di_m5[1];
-double adx_ranging[1];
-bool d_is_ranging = false;
+double bbb_h1_buf[1];  // H1 BB Bandwidth buffer
 double rsi_h1_buf[1];  // H1 RSI buffer
+double rsi_m5_buf[1];  // M5 RSI buffer
+double adx_ranging[1]; // Ranging ADX buffer
+bool d_is_ranging = false;
 
 double d_h1_mean_zone_pct = 0.10; // Dynamic H1 Mean Zone percentage
 double d_m5_mean_zone_pct = 0.10; // Dynamic M5 Mean Zone percentage
@@ -269,6 +322,7 @@ double bb_up_m5_hist[], bb_dn_m5_hist[], atr_m5_hist[]; // M5 BB history for squ
 double bb_up_m1_hist[], bb_dn_m1_hist[], atr_m1_hist[]; // M1 BB history for squeeze-release detection
 
 double dynamic_virtual_tp = 0.0;
+double locked_htf_virtual_tp = 0.0; // Captures static HTF target at entry
 datetime last_trade_bar = 0; 
 
 // Base speed tracking (for ENTRY_DECELERATION)
@@ -286,6 +340,7 @@ datetime trade_start_time = 0;
 bool   trade_is_spike = false; 
 bool   d_pure_momentum = false; 
 string d_mom_status = "WAITING"; 
+bool   active_trade_is_upgraded = false;
 
 //--- Dashboard Logic Variables ---
 bool d_m5_buy, d_m5_sell, d_h1_buy, d_h1_sell;
@@ -293,24 +348,44 @@ bool d_clear_buy, d_clear_sell;
 bool d_sweep_buy, d_sweep_sell;
 bool d_sweep_buy_latched = false;
 bool d_sweep_sell_latched = false;
+string latched_sweep_type_buy = "";
+double latched_sweep_price_buy = 0.0;
+string latched_sweep_type_sell = "";
+double latched_sweep_price_sell = 0.0;
 datetime sweep_buy_bar = 0;
 datetime sweep_sell_bar = 0;
 bool d_extreme_buy, d_extreme_sell;
 bool d_sqz_m1, d_sqz_m5, d_sqz_h1, is_squeeze;
+bool d_bm_armed_buy, d_bm_armed_sell;
 bool d_is_news_time = false;
 int d_h1_trend = 0; 
 int d_m5_trend = 0; 
 double d_fib50 = 0.0;
+double d_fib_active_buy = 0.0;
+double d_fib_active_sell = 0.0; 
 double current_ct_spike_atr_mult = 0.0; 
 
 bool d_m1_is_ranging = false;
 int d_m1_mom_trend = 0; // 1 = UP, -1 = DOWN, 0 = NEUTRAL
-double d_m1_hh_ratio = 50.0; 
-
-// NEW: RSI zone dashboard state
+double d_m1_hh_ratio     = 50.0;  // Current M1 Uptrend ratio
 double d_rsi_h1_value    = 50.0;  // Current H1 RSI reading
+double d_rsi_m5_value    = 50.0;  // Current M5 RSI reading
 double d_h1_zone_buy_pct = 0.0;   // Effective buy zone % (after RSI adaptation)
 double d_h1_zone_sel_pct = 0.0;   // Effective sell zone % (after RSI adaptation)
+
+bool m1_mom_bypass_active_buy  = false; // Track if momentum extreme bypass is active for BUY
+bool m1_mom_bypass_active_sell = false; // Track if momentum extreme bypass is active for SELL
+
+// M1 Momentum Bypass Visualization Globals
+double g_mb_push_size = 0.0;
+double g_mb_prev_size = 0.0;
+double g_mb_ratio = 0.0;
+int    g_mb_start_idx = -1;
+int    g_mb_end_idx = -1;
+int    g_mb_prev_start_idx = -1;
+int    g_mb_prev_end_idx = -1;
+bool   g_mb_is_valid = false;
+int    g_mb_trend_dir = 0;
 
 string d_pd_status = "WAIT";
 string h1_dash_txt = "WAIT (Mid Zone)";
@@ -358,6 +433,13 @@ input bool                 Use_EOD_Filter     = true; // [TOGGLE] Prevent tradin
 input int                  EOD_Mins_Before    = 30;   // Mins before end of day to halt trading
 input int                  EOD_Mins_After     = 30;   // Mins after open of day to halt trading
 
+//+------------------------------------------------------------------+
+//| Trading Hours Filter                                             |
+//+------------------------------------------------------------------+
+input string               __TradingHours__   = "=== 12b. Trading Hours Filter ===";
+input bool                 Use_Trading_Hours  = true; // [TOGGLE] Disable trading during specific hours
+input string               Blocked_Hours      = "2,3"; // Comma-separated list of server hours to block (0-23)
+
 //--- News Cache
 datetime last_news_check_time = 0;
 bool cached_news_state = false;
@@ -367,6 +449,33 @@ SLiquidity active_supports[];
 SLiquidity active_resistances[];
 
 struct STempLiquidity { double price; datetime time; int bar_index; bool is_major; bool is_eq; bool req_deep; int break_idx; bool flip_broken; };
+
+//+------------------------------------------------------------------+
+//| Helper Function: Check Trading Hours                             |
+//+------------------------------------------------------------------+
+bool IsTradingHourBlocked() {
+    if(!Use_Trading_Hours) return false;
+    if(Blocked_Hours == "") return false;
+
+    MqlDateTime dt;
+    TimeCurrent(dt);
+    int current_hour = dt.hour;
+    
+    string hours[];
+    StringSplit(Blocked_Hours, ',', hours);
+    int num_hours = ArraySize(hours);
+    
+    for(int i = 0; i < num_hours; i++) {
+        string h_str = hours[i];
+        StringTrimLeft(h_str);
+        StringTrimRight(h_str);
+        if(h_str == "") continue;
+        int h = (int)StringToInteger(h_str);
+        if(h == current_hour) return true;
+    }
+    
+    return false;
+}
 
 //+------------------------------------------------------------------+
 //| Helper Function: Parse Speed Ranges                              |
@@ -398,6 +507,25 @@ bool IsSpeedAllowed(double speed, string ranges_str) {
 }
 
 //+------------------------------------------------------------------+
+//| Helper Function: Get Historical M1 Momentum Trend                |
+//+------------------------------------------------------------------+
+int GetHistoricalM1MomTrend(int bar_index) {
+    if(!Use_M1_Momentum) return 0;
+    int hh_count = 0; int ll_count = 0;
+    for(int k = 0; k < M1_Mom_Lookback; k++) {
+        if(iHigh(_Symbol, _Period, bar_index + k) > iHigh(_Symbol, _Period, bar_index + k + 1)) hh_count++;
+        if(iLow(_Symbol, _Period, bar_index + k) < iLow(_Symbol, _Period, bar_index + k + 1)) ll_count++;
+    }
+    int total_moves = hh_count + ll_count;
+    double ratio = 50.0;
+    if(total_moves > 0) ratio = ((double)hh_count / (double)total_moves) * 100.0;
+    
+    if(ratio >= M1_Mom_Trend_Threshold) return 1;
+    if(ratio <= (100.0 - M1_Mom_Trend_Threshold)) return -1;
+    return 0;
+}
+
+//+------------------------------------------------------------------+
 //| Expert initialization function                                   |
 //+------------------------------------------------------------------+
 int OnInit() {
@@ -417,11 +545,13 @@ int OnInit() {
     handle_ADX_M5 = iADX(_Symbol, InpHTF1, ADX_Period);
     handle_ADX_Ranging = iADX(_Symbol, Ranging_ADX_TF, ADX_Period);
     handle_RSI_H1 = iRSI(_Symbol, InpHTF2, RSI_H1_Period, PRICE_CLOSE); // NEW
+    handle_RSI_M5 = iRSI(_Symbol, InpHTF1, RSI_H1_Period, PRICE_CLOSE); // NEW
     handle_Crawl_MA = iMA(_Symbol, _Period, Crawl_MA_Period, 0, MODE_EMA, PRICE_CLOSE);
 
     if(handle_BB_M1 == INVALID_HANDLE || handle_BB_M5 == INVALID_HANDLE || handle_BB_H1 == INVALID_HANDLE || 
        handle_ATR_M1 == INVALID_HANDLE || handle_ATR_M5 == INVALID_HANDLE || handle_ATR_H1 == INVALID_HANDLE ||
-       handle_ADX_H1 == INVALID_HANDLE || handle_ADX_M5 == INVALID_HANDLE || handle_ADX_Ranging == INVALID_HANDLE || handle_RSI_H1 == INVALID_HANDLE || handle_Crawl_MA == INVALID_HANDLE)
+       handle_ADX_H1 == INVALID_HANDLE || handle_ADX_M5 == INVALID_HANDLE || handle_ADX_Ranging == INVALID_HANDLE || 
+       handle_RSI_H1 == INVALID_HANDLE || handle_RSI_M5 == INVALID_HANDLE || handle_Crawl_MA == INVALID_HANDLE)
         return(INIT_FAILED);
         
     return(INIT_SUCCEEDED);
@@ -447,6 +577,7 @@ void OnTick() {
         dynamic_virtual_tp = 0.0; 
         current_ticket = 0; bos_armed = false; tracked_struct_level = 0.0; trade_start_time = 0;
         trade_is_spike = false; d_pure_momentum = false; d_mom_status = "N/A";
+        active_trade_is_upgraded = false;
         CheckEntry();
     }
 
@@ -499,9 +630,11 @@ bool UpdateIndicatorBuffers() {
         if(CopyBuffer(handle_ADX_Ranging, 0, 0, 1, adx_ranging) <= 0) return false;
     }
 
-    // Read H1 RSI (always, so dashboard always shows it)
+    // Fetch RSI values
     if(CopyBuffer(handle_RSI_H1, 0, 0, 1, rsi_h1_buf) <= 0) return false;
     d_rsi_h1_value = rsi_h1_buf[0];
+    if(CopyBuffer(handle_RSI_M5, 0, 0, 1, rsi_m5_buf) <= 0) return false;
+    d_rsi_m5_value = rsi_m5_buf[0];
     
     if(Use_Crawl_Exit) {
         int ma_buffer_size = Crawl_Consecutive_Bars + 5;
@@ -1058,6 +1191,7 @@ void CheckM1SqueezeLiquiditySynergy() {
 //| tight (= H1_Extreme_Zone_Pct). When momentum is weak the zone   |
 //| expands linearly up to H1_RSI_Max_Zone_Pct (hard-capped at 0.25)|
 //| which equals the midpoint between the BB mean and the band edge. |
+//|                                                                  |
 //+------------------------------------------------------------------+
 double GetDynamicH1ZonePct(bool isBuy) {
     if(!Use_RSI_Zone_Adapt) return H1_Extreme_Zone_Pct;
@@ -1103,17 +1237,35 @@ double GetDynamicH1ZonePct(bool isBuy) {
 }
 
 //+------------------------------------------------------------------+
-//| Get Dynamic Mean Zone Pct based on ADX                           |
+//| Get Dynamic Mean Zone Pct based on ADX or RSI                    |
 //+------------------------------------------------------------------+
-double GetDynamicMeanZonePct(double adx_val, double base_pct) {
+double GetDynamicMeanZonePct(double adx_val, double rsi_val, int trend_dir, double base_pct) {
     if(!Use_Dynamic_Mean_Zone) return base_pct;
     
-    // Scale between ADX_Threshold (e.g. 25) and 50.0
-    if(adx_val <= ADX_Threshold) return base_pct;
-    if(adx_val >= 50.0) return MaxMeanZonePct;
+    if(Dyn_Mean_Mode == DYN_MEAN_ADX) {
+        if(adx_val <= ADX_Threshold) return base_pct;
+        if(adx_val >= 50.0) return MaxMeanZonePct;
+        
+        double ratio = (adx_val - ADX_Threshold) / (50.0 - ADX_Threshold);
+        return base_pct + ratio * (MaxMeanZonePct - base_pct);
+    } 
+    else if(Dyn_Mean_Mode == DYN_MEAN_RSI) {
+        if(trend_dir == 0) return base_pct;
+        
+        double ratio = 0.0;
+        if(trend_dir == 1) { // Up Trend
+            if(rsi_val <= 50.0) return base_pct;
+            if(rsi_val >= RSI_Strong_Up) return MaxMeanZonePct;
+            ratio = (rsi_val - 50.0) / (RSI_Strong_Up - 50.0);
+        } else if(trend_dir == -1) { // Down Trend
+            if(rsi_val >= 50.0) return base_pct;
+            if(rsi_val <= RSI_Strong_Dn) return MaxMeanZonePct;
+            ratio = (50.0 - rsi_val) / (50.0 - RSI_Strong_Dn);
+        }
+        return base_pct + ratio * (MaxMeanZonePct - base_pct);
+    }
     
-    double ratio = (adx_val - ADX_Threshold) / (50.0 - ADX_Threshold);
-    return base_pct + ratio * (MaxMeanZonePct - base_pct);
+    return base_pct;
 }
 
 //+------------------------------------------------------------------+
@@ -1256,13 +1408,9 @@ void EvaluateDashboardStates() {
     }
 
     // --- 3. H1 Trend & Zone ---
-    // Compute RSI-adaptive zone percentages for this tick
+    // Compute RSI-adaptive extreme zone percentages for this tick
     d_h1_zone_buy_pct = GetDynamicH1ZonePct(true);   // NEW
     d_h1_zone_sel_pct = GetDynamicH1ZonePct(false);  // NEW
-
-    // Compute dynamic mean zone percentages
-    d_h1_mean_zone_pct = GetDynamicMeanZonePct(adx_h1[0], MeanZonePct);
-    d_m5_mean_zone_pct = GetDynamicMeanZonePct(adx_m5[0], MeanZonePct_M5);
 
     d_h1_trend = 0; 
     if(Use_Trend_Filter) {
@@ -1273,7 +1421,14 @@ void EvaluateDashboardStates() {
             if(up && h1_close > hist_base_h1[0]) d_h1_trend = 1; if(dn && h1_close < hist_base_h1[0]) d_h1_trend = -1;
         } 
         else if(Trend_Method == TREND_ADX) {
-            if(adx_h1[0] >= ADX_Threshold) { if(plus_di_h1[0] > minus_di_h1[0]) d_h1_trend = 1; else if(minus_di_h1[0] > plus_di_h1[0]) d_h1_trend = -1; }
+            if(adx_h1[0] >= ADX_Threshold) { 
+                if(!ADX_Dir_From_Mean) {
+                    if(plus_di_h1[0] > minus_di_h1[0]) d_h1_trend = 1; else if(minus_di_h1[0] > plus_di_h1[0]) d_h1_trend = -1; 
+                } else {
+                    double h1_close = iClose(_Symbol, InpHTF2, 0);
+                    if(h1_close > bb_base_h1[0]) d_h1_trend = 1; else d_h1_trend = -1;
+                }
+            }
         }
     }
     
@@ -1286,9 +1441,20 @@ void EvaluateDashboardStates() {
             if(up && m5_close > hist_base_m5[0]) d_m5_trend = 1; if(dn && m5_close < hist_base_m5[0]) d_m5_trend = -1;
         } 
         else if(Trend_Method == TREND_ADX) {
-            if(adx_m5[0] >= ADX_Threshold) { if(plus_di_m5[0] > minus_di_m5[0]) d_m5_trend = 1; else if(minus_di_m5[0] > plus_di_m5[0]) d_m5_trend = -1; }
+            if(adx_m5[0] >= ADX_Threshold) { 
+                if(!ADX_Dir_From_Mean) {
+                    if(plus_di_m5[0] > minus_di_m5[0]) d_m5_trend = 1; else if(minus_di_m5[0] > plus_di_m5[0]) d_m5_trend = -1; 
+                } else {
+                    double m5_close = iClose(_Symbol, InpHTF1, 0);
+                    if(m5_close > bb_base_m5[0]) d_m5_trend = 1; else d_m5_trend = -1;
+                }
+            }
         }
     }
+
+    // COMPUTE DYNAMIC MEAN ZONES (Can be scaled by ADX or recently computed RSI/Trend)
+    d_h1_mean_zone_pct = GetDynamicMeanZonePct(adx_h1[0], d_rsi_h1_value, d_h1_trend, MeanZonePct);
+    d_m5_mean_zone_pct = GetDynamicMeanZonePct(adx_m5[0], d_rsi_m5_value, d_m5_trend, MeanZonePct_M5);
 
     double h1_range = bb_up_h1[0] - bb_dn_h1[0];
     bool is_ct_spike = Allow_CT_On_Spikes ? IsCurrentSpike(CT_Spike_Lookback_Bars, CT_Spike_ATR_Multiplier, CT_Spike_ATR_Shift) : false;
@@ -1308,19 +1474,19 @@ void EvaluateDashboardStates() {
     }
 
     h1_dash_txt = "WAITING"; h1_dash_col = clrDimGray;
-    if(d_h1_trend == 1) {
-        if(d_h1_buy) { h1_dash_txt = "BUY VALID (Trend Mean & Below)"; h1_dash_col = clrGreen; }
+    if(d_h1_trend == 1) { // UP TREND
+        if(d_h1_buy) { h1_dash_txt = "BUY VALID (UP Trend: Mean & Below)"; h1_dash_col = clrGreen; }
         else if(ValidMTFZone(ask, bb_dn_h1[0], bb_up_h1[0], false, d_h1_zone_sel_pct)) {  // CHANGED
-            if(!Block_Counter_Trend) { h1_dash_txt = "SELL VALID (CT Allowed)"; h1_dash_col = clrDarkOrange; }
-            else if(is_ct_spike) { h1_dash_txt = "SELL VALID (CT Spike Bypass)"; h1_dash_col = clrPurple; }
-            else { h1_dash_txt = "SELL BLOCKED (Need CT Spike)"; h1_dash_col = clrRed; }
+            if(!Block_Counter_Trend) { h1_dash_txt = "SELL VALID (UP Trend: CT Allowed)"; h1_dash_col = clrDarkOrange; }
+            else if(is_ct_spike) { h1_dash_txt = "SELL VALID (UP Trend: CT Spike Bypass)"; h1_dash_col = clrPurple; }
+            else { h1_dash_txt = "SELL BLOCKED (UP Trend: Need CT Spike)"; h1_dash_col = clrRed; }
         }
-    } else if(d_h1_trend == -1) {
-        if(d_h1_sell) { h1_dash_txt = "SELL VALID (Trend Mean & Above)"; h1_dash_col = clrRed; }
+    } else if(d_h1_trend == -1) { // DOWN TREND
+        if(d_h1_sell) { h1_dash_txt = "SELL VALID (DOWN Trend: Mean & Above)"; h1_dash_col = clrRed; }
         else if(ValidMTFZone(bid, bb_dn_h1[0], bb_up_h1[0], true, d_h1_zone_buy_pct)) {  // CHANGED
-            if(!Block_Counter_Trend) { h1_dash_txt = "BUY VALID (CT Allowed)"; h1_dash_col = clrDarkOrange; }
-            else if(is_ct_spike) { h1_dash_txt = "BUY VALID (CT Spike Bypass)"; h1_dash_col = clrPurple; }
-            else { h1_dash_txt = "BUY BLOCKED (Need CT Spike)"; h1_dash_col = clrRed; }
+            if(!Block_Counter_Trend) { h1_dash_txt = "BUY VALID (DOWN Trend: CT Allowed)"; h1_dash_col = clrDarkOrange; }
+            else if(is_ct_spike) { h1_dash_txt = "BUY VALID (DOWN Trend: CT Spike Bypass)"; h1_dash_col = clrPurple; }
+            else { h1_dash_txt = "BUY BLOCKED (DOWN Trend: Need CT Spike)"; h1_dash_col = clrRed; }
         }
     } else {
         if(d_h1_buy)  { h1_dash_txt = "BUY VALID (Extreme Bottom)"; h1_dash_col = clrGreen; }
@@ -1342,13 +1508,38 @@ void EvaluateDashboardStates() {
         d_m5_sell = ValidMTFZone(ask, bb_dn_m5[0], bb_up_m5[0], false, M5_Extreme_Zone_Pct); 
     }
 
-    // --- 5. Fib 50% ---
+    // --- 5. Fib 50% & 38.2% Dynamic ---
     double highest = iHigh(_Symbol, _Period, iHighest(_Symbol, _Period, MODE_HIGH, SwingLookback, 1)); 
     double lowest = iLow(_Symbol, _Period, iLowest(_Symbol, _Period, MODE_LOW, SwingLookback, 1)); 
-    d_fib50 = lowest + ((highest - lowest) / 2.0);
+    double fib_range = highest - lowest;
+    
+    d_fib50 = lowest + (fib_range / 2.0);
+    d_fib_active_buy = d_fib50;
+    d_fib_active_sell = d_fib50;
+    
+    bool fib38_buy_active = false;
+    bool fib38_sell_active = false;
+    
+    if(Use_Fib38_Trending) {
+        if(d_h1_trend == 1 && d_rsi_h1_value >= RSI_Strong_Up) {
+            d_fib_active_buy = highest - (fib_range * 0.382);
+            fib38_buy_active = true;
+        }
+        if(d_h1_trend == -1 && d_rsi_h1_value <= RSI_Strong_Dn) {
+            d_fib_active_sell = lowest + (fib_range * 0.382);
+            fib38_sell_active = true;
+        }
+    }
+    
     if(!Use_Fib50_Filter) d_pd_status = "DISABLED (BUY/SELL OK)";
-    else if(bid < d_fib50) d_pd_status = "DISCOUNT (BUY OK)"; 
-    else if(ask > d_fib50) d_pd_status = "PREMIUM (SELL OK)"; 
+    else if(bid < d_fib_active_buy) {
+         if(fib38_buy_active && bid >= d_fib50) d_pd_status = "DISCOUNT (BUY OK - 38.2%)";
+         else d_pd_status = "DISCOUNT (BUY OK)";
+    }
+    else if(ask > d_fib_active_sell) {
+         if(fib38_sell_active && ask <= d_fib50) d_pd_status = "PREMIUM (SELL OK - 38.2%)";
+         else d_pd_status = "PREMIUM (SELL OK)";
+    }
     else d_pd_status = "MIDDLE (WAIT)";
 
     // --- 6. Squeeze & M1 Band Piercing ---
@@ -1500,12 +1691,178 @@ void EvaluateDashboardStates() {
     double buy_extreme = is_squeeze ? (bb_dn_m1[0] - (atr_m1[0] * 0.5)) : bb_dn_m1[0]; 
     double sell_extreme = is_squeeze ? (bb_up_m1[0] + (atr_m1[0] * 0.5)) : bb_up_m1[0];
     
+    // Default Rule: Must pierce or exactly touch the extreme band/squeeze offset
     d_extreme_buy = (bid <= buy_extreme);
     d_extreme_sell = (ask >= sell_extreme);
 
+    // --- M1 Momentum Bypass ---
+    m1_mom_bypass_active_buy = false;
+    m1_mom_bypass_active_sell = false;
+    if(Use_M1_Momentum && M1_Mom_Bypass_Extreme) {
+        double m1_range = (bb_up_m1[0] - bb_dn_m1[0]);
+        double near_dist = m1_range * M1_Mom_Bypass_Near_Pct;
+        
+        // Reset visualization globals before computing
+        g_mb_push_size = 0; g_mb_prev_size = 0; g_mb_ratio = 0;
+        g_mb_start_idx = -1; g_mb_end_idx = -1; 
+        g_mb_prev_start_idx = -1; g_mb_prev_end_idx = -1;
+        g_mb_is_valid = false;
+        g_mb_trend_dir = 0;
+        
+        // Find the most recent strong momentum within the lookback
+        int recent_strong_idx = -1;
+        int recent_trend_dir = 0;
+        
+        for(int k = 0; k <= M1_Mom_Bypass_Lookback; k++) {
+            int hist_trend = GetHistoricalM1MomTrend(k);
+            if(hist_trend != 0) {
+                recent_strong_idx = k;
+                recent_trend_dir = hist_trend;
+                break;
+            }
+        }
+        
+        if(recent_strong_idx != -1) {
+            // Find the start of this specific push
+            int start_idx = recent_strong_idx;
+            while(start_idx < Bars(_Symbol, _Period) && GetHistoricalM1MomTrend(start_idx + 1) == recent_trend_dir) {
+                start_idx++;
+            }
+            
+            // Calculate push size
+            double push_max = 0.0, push_min = 999999.0;
+            for(int k = recent_strong_idx; k <= start_idx; k++) {
+                if(iHigh(_Symbol, _Period, k) > push_max) push_max = iHigh(_Symbol, _Period, k);
+                if(iLow(_Symbol, _Period, k) < push_min) push_min = iLow(_Symbol, _Period, k);
+            }
+            double push_size = push_max - push_min;
+            
+            // Calculate previous timeframe size
+            int prev_start = start_idx + 1;
+            int prev_end = prev_start + M1_Mom_Bypass_Prev_Bars - 1;
+            double prev_max = 0.0, prev_min = 999999.0;
+            
+            if (prev_end < Bars(_Symbol, _Period)) {
+                for(int k = prev_start; k <= prev_end; k++) {
+                    if(iHigh(_Symbol, _Period, k) > prev_max) prev_max = iHigh(_Symbol, _Period, k);
+                    if(iLow(_Symbol, _Period, k) < prev_min) prev_min = iLow(_Symbol, _Period, k);
+                }
+                double prev_size = prev_max - prev_min;
+                
+                // Store in globals
+                g_mb_push_size = push_size;
+                g_mb_prev_size = prev_size;
+                if(prev_size > 0) g_mb_ratio = push_size / prev_size; else g_mb_ratio = 999.0;
+                g_mb_start_idx = start_idx;
+                g_mb_end_idx = recent_strong_idx;
+                g_mb_prev_start_idx = prev_start;
+                g_mb_prev_end_idx = prev_end;
+                g_mb_trend_dir = recent_trend_dir;
+                
+                // Avoid division by zero and measure if push was big enough
+                if(prev_size > 0 && push_size >= (prev_size * M1_Mom_Bypass_Multiplier)) {
+                    g_mb_is_valid = true;
+                
+                    // Down momentum (strong push down) -> Buy bypass if near lower band
+                    if(recent_trend_dir == -1 && bid <= (buy_extreme + near_dist)) {
+                        d_extreme_buy = true;
+                        m1_mom_bypass_active_buy = true;
+                    }
+                    
+                    // Up momentum (strong push up) -> Sell bypass if near upper band
+                    if(recent_trend_dir == 1 && ask >= (sell_extreme - near_dist)) {
+                        d_extreme_sell = true;
+                        m1_mom_bypass_active_sell = true;
+                    }
+                }
+            }
+        }
+    }
+
+    // --- Big Move State Machine ---
+    d_bm_armed_buy = false;
+    d_bm_armed_sell = false;
+    
+    if(Use_BigMove_Bypass) {
+        double m1_range = (bb_up_m1[0] - bb_dn_m1[0]);
+        double near_dist = m1_range * BigMove_Near_Pct;
+        
+        // 1. Detect big moves (if currently Neutral or looking for a fresh move)
+        if(bm_state == 0 && atr_m1[0] > 0) {
+            double max_h = 0.0, min_l = 999999.0;
+            for(int k=0; k<MathMin(BigMove_Lookback, ArraySize(atr_m1)); k++) {
+                if(iHigh(_Symbol, _Period, k) > max_h) max_h = iHigh(_Symbol, _Period, k);
+                if(iLow(_Symbol, _Period, k) < min_l) min_l = iLow(_Symbol, _Period, k);
+            }
+            double range = max_h - min_l;
+            double required = BigMove_ATR_Mult * atr_m1[CT_Spike_ATR_Shift]; // using established safe ATR
+            
+            if(range >= required) {
+                // If current price is low, it's a big move DOWN
+                if(bid <= bb_base_m1[0]) {
+                    bm_state = 1; // 1 = BigDown(WaitMid)
+                } 
+                // If current price is high, it's a big move UP
+                else if(ask >= bb_base_m1[0]) {
+                    bm_state = -1; // -1 = BigUp(WaitMid)
+                }
+            }
+        }
+        
+        // 2. State Progression
+        if(bm_state == 1) { // Waiting for price to normalize above mid-band
+            if(bid > bb_base_m1[0]) {
+                bm_state = 2; // Armed for BUY
+                bm_trades_taken = 0;
+            }
+        } 
+        else if(bm_state == -1) { // Waiting for price to normalize below mid-band
+            if(ask < bb_base_m1[0]) {
+                bm_state = -2; // Armed for SELL
+                bm_trades_taken = 0;
+            }
+        }
+        
+        // 3. Evaluate Bypass Conditions
+        if(bm_state == 2) {
+            if(bm_trades_taken < BigMove_Max_Trades) {
+                // Check if price is 'near' the band
+                if(bid <= (buy_extreme + near_dist)) {
+                    d_extreme_buy = true; // EXTREME BYPASS
+                    d_bm_armed_buy = true;
+                }
+            } else {
+                bm_state = 0; // Max trades reached, reset
+            }
+            // Disarm if hits opposite band extreme
+            if(ask >= sell_extreme) bm_state = 0;
+        }
+        else if(bm_state == -2) {
+            if(bm_trades_taken < BigMove_Max_Trades) {
+                // Check if price is 'near' the upper band
+                if(ask >= (sell_extreme - near_dist)) {
+                    d_extreme_sell = true; // EXTREME BYPASS
+                    d_bm_armed_sell = true;
+                }
+            } else {
+                bm_state = 0; // Max trades reached, reset
+            }
+            // Disarm if hits opposite lower band extreme
+            if(bid <= buy_extreme) bm_state = 0;
+        }
+    }
+
     // --- 7. Liquidity Sweep ---
-    bool current_d_sweep_buy = CheckLiquiditySweepRealTime(true, bid);
-    bool current_d_sweep_sell = CheckLiquiditySweepRealTime(false, ask);
+    bool disable_deep_buy = (DeepSweep_M1_Bypass_Disable && m1_mom_bypass_active_buy);
+    bool disable_deep_sell = (DeepSweep_M1_Bypass_Disable && m1_mom_bypass_active_sell);
+    
+    string current_sweep_type_buy = "";
+    double current_sweep_price_buy = 0.0;
+    bool current_d_sweep_buy = CheckLiquiditySweepRealTime(true, bid, current_sweep_type_buy, current_sweep_price_buy, disable_deep_buy);
+    
+    string current_sweep_type_sell = "";
+    double current_sweep_price_sell = 0.0;
+    bool current_d_sweep_sell = CheckLiquiditySweepRealTime(false, ask, current_sweep_type_sell, current_sweep_price_sell, disable_deep_sell);
     
     datetime current_bar = iTime(_Symbol, _Period, 0);
 
@@ -1513,6 +1870,8 @@ void EvaluateDashboardStates() {
     if(current_d_sweep_buy) {
         d_sweep_buy_latched = true;
         sweep_buy_bar = current_bar;
+        latched_sweep_type_buy = current_sweep_type_buy;
+        latched_sweep_price_buy = current_sweep_price_buy;
     } else if(d_sweep_buy_latched) {
         int sweep_idx = iBarShift(_Symbol, _Period, sweep_buy_bar);
         if(sweep_idx > 0) {
@@ -1531,6 +1890,8 @@ void EvaluateDashboardStates() {
     if(current_d_sweep_sell) {
         d_sweep_sell_latched = true;
         sweep_sell_bar = current_bar;
+        latched_sweep_type_sell = current_sweep_type_sell;
+        latched_sweep_price_sell = current_sweep_price_sell;
     } else if(d_sweep_sell_latched) {
         int sweep_idx = iBarShift(_Symbol, _Period, sweep_sell_bar);
         if(sweep_idx > 0) {
@@ -1574,10 +1935,52 @@ void EvaluateDashboardStates() {
 
 }
 
+//+------------------------------------------------------------------+
+//| Calculate Daily Net Profit                                       |
+//+------------------------------------------------------------------+
+double GetDailyNetProfit() {
+    double daily_profit = 0.0;
+    datetime current_time = TimeCurrent();
+    MqlDateTime dt;
+    TimeToStruct(current_time, dt);
+    dt.hour = 0;
+    dt.min = 0;
+    dt.sec = 0;
+    datetime start_of_day = StructToTime(dt);
+    
+    if(HistorySelect(start_of_day, current_time)) {
+        int deals = HistoryDealsTotal();
+        for(int i = 0; i < deals; i++) {
+            ulong ticket = HistoryDealGetTicket(i);
+            if(ticket > 0) {
+                if(HistoryDealGetString(ticket, DEAL_SYMBOL) == _Symbol && HistoryDealGetInteger(ticket, DEAL_MAGIC) == MagicNumber) {
+                    long entry_type = HistoryDealGetInteger(ticket, DEAL_ENTRY);
+                    // Only sum profit/commission/swap on EXITS (out or inout)
+                    if(entry_type == DEAL_ENTRY_OUT || entry_type == DEAL_ENTRY_INOUT || entry_type == DEAL_ENTRY_OUT_BY) {
+                        daily_profit += HistoryDealGetDouble(ticket, DEAL_PROFIT);
+                        daily_profit += HistoryDealGetDouble(ticket, DEAL_COMMISSION);
+                        daily_profit += HistoryDealGetDouble(ticket, DEAL_SWAP);
+                    }
+                }
+            }
+        }
+    }
+    return daily_profit;
+}
+
 void DrawDashboard() {
     int x = 20, y = 20, gap = 18; color c_buy = clrGreen, c_sell = clrRed, c_wait = clrDimGray, c_text = clrBlack;
 
-    DrawLabel("dash_title", "[ Bands Sweeper v2.1 ]", x, y, clrBlue);
+    double daily_net = GetDailyNetProfit();
+    string net_str = StringFormat("[ Net D1: %.2f ]", daily_net);
+    color net_col = (daily_net > 0) ? clrGreen : ((daily_net < 0) ? clrRed : clrGray);
+
+    y+=gap;
+    MqlDateTime dt_gmt;
+    TimeGMT(dt_gmt);
+    string gmt_str = StringFormat("%02d:%02d", dt_gmt.hour, dt_gmt.min);
+    DrawLabel("dash_title", StringFormat("[ Bands Sweeper v2.1 | GMT %s ]", gmt_str), x + 150, y, clrBlue);
+    DrawLabel("dash_daily_net", net_str, x, y, net_col);
     
     // ==========================================
     // SECTION 1: LIVE ENTRY CHECKLIST
@@ -1585,8 +1988,14 @@ void DrawDashboard() {
     DrawLabel("dash_div1", "--- LIVE ENTRY CHECKLIST ---", x, y+=gap, clrBlue);
 
     if(Use_Ranging_Filter) {
-        if(d_is_ranging) DrawLabel("dash_chk_ranging", StringFormat("[0] Market State: RANGING (M5/H1 Bypassed) | ADX: %.1f", adx_ranging[0]), x, y+=gap, clrDarkGoldenrod);
-        else             DrawLabel("dash_chk_ranging", StringFormat("[0] Market State: TRENDING | ADX: %.1f", adx_ranging[0]), x, y+=gap, clrGreen);
+        if(d_is_ranging) {
+            DrawLabel("dash_chk_ranging", StringFormat("[0] Market State: RANGING (M5/H1 Bypassed) | ADX: %.1f", adx_ranging[0]), x, y+=gap, clrDarkGoldenrod);
+        } else {
+            string tr_dir = "NEUTRAL";
+            if(d_h1_trend == 1) tr_dir = "UP";
+            else if(d_h1_trend == -1) tr_dir = "DOWN";
+            DrawLabel("dash_chk_ranging", StringFormat("[0] Market State: TRENDING %s | ADX: %.1f", tr_dir, adx_ranging[0]), x, y+=gap, clrGreen);
+        }
     }
 
     if(Use_News_Filter) DrawLabel("dash_chk_news", "[1] News Filter: " + (d_is_news_time ? "PAUSED (High Impact)" : "CLEAR"), x, y+=gap, d_is_news_time ? clrRed : clrGreen);
@@ -1628,17 +2037,51 @@ void DrawDashboard() {
     }
 
     string swp_txt = "WAITING"; color swp_col = c_wait;
-    if(d_sweep_buy) { swp_txt = "BUY SWEPT"; swp_col = c_buy; }
-    else if(d_sweep_sell) { swp_txt = "SELL SWEPT"; swp_col = c_sell; }
-    if(Use_Deep_Sweep) swp_txt += " (Deep Req: ON)";
+    if(d_sweep_buy) { 
+        swp_txt = latched_sweep_type_buy + " (Sell Side) Swept | BUY Allowed | " + DoubleToString(latched_sweep_price_buy, _Digits); 
+        swp_col = c_buy; 
+    }
+    else if(d_sweep_sell) { 
+        swp_txt = latched_sweep_type_sell + " (Buy Side) Swept | SELL Allowed | " + DoubleToString(latched_sweep_price_sell, _Digits); 
+        swp_col = c_sell; 
+    }
+    
+    if(Use_Deep_Sweep) {
+        if(DeepSweep_M1_Bypass_Disable && (m1_mom_bypass_active_buy || m1_mom_bypass_active_sell)) {
+            swp_txt += " (Deep Req: OFF via Bypass)";
+        } else {
+            swp_txt += " (Deep Req: ON)";
+        }
+    }
+    
     DrawLabel("dash_chk_swp", "[6] Liquidity: " + swp_txt, x, y+=gap, swp_col);
 
     string ext_txt = "WAITING"; color ext_col = c_wait;
-    if(d_extreme_buy) { ext_txt = "BUY PIERCED"; ext_col = c_buy; }
-    else if(d_extreme_sell) { ext_txt = "SELL PIERCED"; ext_col = c_sell; }
+    if(d_extreme_buy) { 
+        ext_txt = "BUY PIERCED"; ext_col = c_buy; 
+        if(d_bm_armed_buy) ext_txt = "BUY NEAR (Big Move Bypass)";
+        else if(m1_mom_bypass_active_buy) ext_txt = "BUY NEAR (Mom Bypass)";
+    }
+    else if(d_extreme_sell) { 
+        ext_txt = "SELL PIERCED"; ext_col = c_sell; 
+        if(d_bm_armed_sell) ext_txt = "SELL NEAR (Big Move Bypass)";
+        else if(m1_mom_bypass_active_sell) ext_txt = "SELL NEAR (Mom Bypass)";
+    }
     if(Use_Squeeze_Filter && is_squeeze) ext_txt += " (Squeeze Offset)";
     string tf_str = StringSubstr(EnumToString(_Period), 7);
     DrawLabel("dash_chk_ext", "[7] " + tf_str + " Extreme: " + ext_txt, x, y+=gap, ext_col);
+    
+    // Show Big Move state on Dashboard
+    if(Use_BigMove_Bypass && bm_state != 0) {
+        string bm_txt = ""; color bm_col = clrPurple;
+        if(bm_state == 1) bm_txt = "Big Move UP (Wait Mid Band Normalization)";
+        else if(bm_state == -1) bm_txt = "Big Move DN (Wait Mid Band Normalization)";
+        else if(bm_state == 2) bm_txt = StringFormat("Armed for BUY (%d/%d Trades)", bm_trades_taken, BigMove_Max_Trades);
+        else if(bm_state == -2) bm_txt = StringFormat("Armed for SELL (%d/%d Trades)", bm_trades_taken, BigMove_Max_Trades);
+        DrawLabel("dash_chk_bm", "[BM] " + bm_txt, x, y+=gap, bm_col);
+    } else {
+        DrawLabel("dash_chk_bm", "", x, y+=gap, clrNONE);
+    }
 
     double rt_pips = (iClose(_Symbol, _Period, 0) - iOpen(_Symbol, _Period, 0)) / _Point; 
     long rt_sec = TimeCurrent() - iTime(_Symbol, _Period, 0);
@@ -1685,15 +2128,62 @@ void DrawDashboard() {
     }
 
     if(Use_M1_Momentum) {
-        string m1_mom_txt = "M1 Mom: NEUTRAL (" + DoubleToString(d_m1_hh_ratio, 0) + "% HH)";
-        color m1_mom_col = clrGray;
-        if(d_m1_mom_trend == 1) { m1_mom_txt = "M1 Mom: STRONG UP (" + DoubleToString(d_m1_hh_ratio, 0) + "% HH)"; m1_mom_col = clrGreen; }
-        else if(d_m1_mom_trend == -1) { m1_mom_txt = "M1 Mom: STRONG DOWN (" + DoubleToString(d_m1_hh_ratio, 0) + "% HH)"; m1_mom_col = clrRed; }
-        else if(d_m1_is_ranging) { m1_mom_txt = "M1 Mom: RANGING (" + DoubleToString(d_m1_hh_ratio, 0) + "% HH) -> HTF BYPASS"; m1_mom_col = clrDarkGoldenrod; }
+        string m1_mom_txt;
+        color m1_mom_col;
+        if(d_m1_mom_trend == 1) { 
+            m1_mom_txt = "M1 Mom: STRONG UP (" + DoubleToString(d_m1_hh_ratio, 0) + "% HH)"; 
+            m1_mom_col = clrGreen; 
+        }
+        else if(d_m1_mom_trend == -1) { 
+            m1_mom_txt = "M1 Mom: STRONG DOWN (" + DoubleToString(d_m1_hh_ratio, 0) + "% HH)"; 
+            m1_mom_col = clrRed; 
+        }
+        else if(d_m1_is_ranging) {
+            if(M1_Mom_Bypass_HTF) {
+                m1_mom_txt = "M1 Mom: RANGING (" + DoubleToString(d_m1_hh_ratio, 0) + "% HH) -> HTF BYPASS"; 
+            } else {
+                m1_mom_txt = "M1 Mom: RANGING (" + DoubleToString(d_m1_hh_ratio, 0) + "% HH) -> NO BYPASS"; 
+            }
+            m1_mom_col = clrDarkGoldenrod; 
+        }
+        else {
+            if(M1_Mom_Allow_Neutral) {
+                m1_mom_txt = "M1 Mom: NEUTRAL (" + DoubleToString(d_m1_hh_ratio, 0) + "% HH) -> ALLOWED";
+                m1_mom_col = clrGray;
+            } else {
+                m1_mom_txt = "M1 Mom: NEUTRAL (" + DoubleToString(d_m1_hh_ratio, 0) + "% HH) -> BLOCKED";
+                m1_mom_col = clrIndianRed;
+            }
+        }
         
         DrawLabel("dash_m1_mom", m1_mom_txt, x, y+=gap, m1_mom_col);
+        
+        // NEW: M1 Bypass Panel Diagnostics (split to multiple lines if needed)
+        if(M1_Mom_Bypass_Extreme) {
+            if(g_mb_start_idx != -1) {
+                string push_dir = (g_mb_trend_dir == 1) ? "UP" : "DN";
+                string mb_line1 = StringFormat("M1 Bypass: Move %s | Push: %.2f | Prev: %.2f", 
+                                                push_dir, g_mb_push_size, g_mb_prev_size);
+                string mb_line2 = StringFormat("       -> Ratio: %.1f (Min %.1f) | %s", 
+                                                g_mb_ratio, M1_Mom_Bypass_Multiplier, 
+                                                (g_mb_is_valid ? "OK" : "DENIED"));
+                
+                color mb_col = g_mb_is_valid ? clrGreen : clrLightCoral;
+                DrawLabel("dash_mb_diag1", mb_line1, x, y+=gap, mb_col);
+                DrawLabel("dash_mb_diag2", mb_line2, x, y+=gap, mb_col);
+            } else {
+                DrawLabel("dash_mb_diag1", "M1 Bypass: WAITING PUSH", x, y+=gap, clrGray);
+                DrawLabel("dash_mb_diag2", "", x, y, clrNONE); 
+            }
+        } else {
+            DrawLabel("dash_mb_diag1", "", x, y, clrNONE);
+            DrawLabel("dash_mb_diag2", "", x, y, clrNONE);
+        }
+        
     } else {
         DrawLabel("dash_m1_mom", "", x, y+=gap, clrNONE);
+        DrawLabel("dash_mb_diag1", "", x, y, clrNONE);
+        DrawLabel("dash_mb_diag2", "", x, y, clrNONE);
     }
 
     if(Use_Squeeze_Filter) {
@@ -1853,11 +2343,100 @@ void DrawDashboard() {
     if (Entry_Strategy == ENTRY_DECELERATION) {
         string speed_txt = base_speed_txt + StringFormat(" | PeakBuy: %.2f | PeakSell: %.2f", peak_buy_speed, peak_sell_speed);
         DrawLabel("dash_speed", speed_txt, x, y+=gap, clrDeepPink);
+        DrawLabel("dash_speed_buy", "", x, y, clrNONE);
+        DrawLabel("dash_speed_sell", "", x, y, clrNONE);
     } else if (Entry_Strategy == ENTRY_DIRECTIONAL_STOP) {
-        string speed_txt = base_speed_txt + StringFormat(" | DirPeak Dn: %.2f | Up: %.2f", peak_speed_down_for_buy, peak_speed_up_for_sell);
-        DrawLabel("dash_speed", speed_txt, x, y+=gap, clrDeepPink);
+        if(Show_Dir_Stop_Details) {
+            string buy_txt1 = StringFormat("[Dir BUY] PkDn: %.2f | CurDn: %.2f", peak_speed_down_for_buy, current_speed_down);
+            string buy_txt2 = StringFormat("          CurUp: %.2f (Req >= %.2f)", current_speed_up, Dir_Entry_Threshold);
+            DrawLabel("dash_speed_buy1", buy_txt1, x, y+=gap, clrDeepPink);
+            DrawLabel("dash_speed_buy2", buy_txt2, x, y+=gap, clrDeepPink);
+
+            string sell_txt1 = StringFormat("[Dir SELL] PkUp: %.2f | CurUp: %.2f", peak_speed_up_for_sell, current_speed_up);
+            string sell_txt2 = StringFormat("           CurDn: %.2f (Req <= -%.2f)", current_speed_down, Dir_Entry_Threshold);
+            DrawLabel("dash_speed_sell1", sell_txt1, x, y+=gap, clrDeepPink);
+            DrawLabel("dash_speed_sell2", sell_txt2, x, y+=gap, clrDeepPink);
+            
+            // Hide the old single line indicators
+            DrawLabel("dash_speed", "", x, y, clrNONE); 
+            DrawLabel("dash_speed_buy", "", x, y, clrNONE); 
+            DrawLabel("dash_speed_sell", "", x, y, clrNONE); 
+        } else {
+            string speed_txt = base_speed_txt + StringFormat(" | DirPeak Dn: %.2f | Up: %.2f", peak_speed_down_for_buy, peak_speed_up_for_sell);
+            DrawLabel("dash_speed", speed_txt, x, y+=gap, clrDeepPink);
+            DrawLabel("dash_speed_buy", "", x, y, clrNONE);
+            DrawLabel("dash_speed_sell", "", x, y, clrNONE);
+            DrawLabel("dash_speed_buy1", "", x, y, clrNONE); DrawLabel("dash_speed_buy2", "", x, y, clrNONE);
+            DrawLabel("dash_speed_sell1", "", x, y, clrNONE); DrawLabel("dash_speed_sell2", "", x, y, clrNONE);
+        }
+    } else if (Entry_Strategy == ENTRY_DIR_STOP_RELATIVE) {
+        long sec_elapsed = TimeCurrent() - iTime(_Symbol, _Period, 0);
+        if(sec_elapsed <= 0) sec_elapsed = 1;
+        double bar_age_pct = (double)sec_elapsed / (double)PeriodSeconds(_Period);
+        bool use_prev = (bar_age_pct < Dir_Relative_Time_Pct);
+        
+        double prev_speed = ((iClose(_Symbol, _Period, 1) - iOpen(_Symbol, _Period, 1)) / _Point) / PeriodSeconds(_Period);
+        double reference_speed = use_prev ? prev_speed : rt_speed;
+        string ref_str = use_prev ? "PrevSpd" : "CurSpd";
+
+        double abs_ref = MathAbs(reference_speed);
+        double req_speed = MathMax(Dir_Relative_Min, abs_ref * Dir_Relative_Ratio);
+        
+        if(Show_Dir_Stop_Details) {
+            string buy_txt1 = StringFormat("[RelDir BUY] %s: %.2f | CurDn: %.2f", ref_str, reference_speed, current_speed_down);
+            string buy_txt2 = StringFormat("             CurUp: %.2f (Req >= %.2f)", current_speed_up, req_speed);
+            DrawLabel("dash_speed_buy1", buy_txt1, x, y+=gap, clrDeepPink);
+            DrawLabel("dash_speed_buy2", buy_txt2, x, y+=gap, clrDeepPink);
+
+            string sell_txt1 = StringFormat("[RelDir SELL] %s: %.2f | CurUp: %.2f", ref_str, reference_speed, current_speed_up);
+            string sell_txt2 = StringFormat("              CurDn: %.2f (Req <= -%.2f)", current_speed_down, req_speed);
+            DrawLabel("dash_speed_sell1", sell_txt1, x, y+=gap, clrDeepPink);
+            DrawLabel("dash_speed_sell2", sell_txt2, x, y+=gap, clrDeepPink);
+            
+            DrawLabel("dash_speed", "", x, y, clrNONE); 
+            DrawLabel("dash_speed_buy", "", x, y, clrNONE); 
+            DrawLabel("dash_speed_sell", "", x, y, clrNONE); 
+        } else {
+            string speed_txt = base_speed_txt + StringFormat(" | RelDir Req: %.2f (Ref: %s)", req_speed, ref_str);
+            DrawLabel("dash_speed", speed_txt, x, y+=gap, clrDeepPink);
+            DrawLabel("dash_speed_buy", "", x, y, clrNONE); DrawLabel("dash_speed_sell", "", x, y, clrNONE);
+            DrawLabel("dash_speed_buy1", "", x, y, clrNONE); DrawLabel("dash_speed_buy2", "", x, y, clrNONE);
+            DrawLabel("dash_speed_sell1", "", x, y, clrNONE); DrawLabel("dash_speed_sell2", "", x, y, clrNONE);
+        }
     } else {
         DrawLabel("dash_speed", base_speed_txt + " (Tracking Entry Speed only)", x, y+=gap, clrDeepPink);
+        DrawLabel("dash_speed_buy", "", x, y, clrNONE);
+        DrawLabel("dash_speed_sell", "", x, y, clrNONE);
+        DrawLabel("dash_speed_buy1", "", x, y, clrNONE); DrawLabel("dash_speed_buy2", "", x, y, clrNONE);
+        DrawLabel("dash_speed_sell1", "", x, y, clrNONE); DrawLabel("dash_speed_sell2", "", x, y, clrNONE);
+    }
+
+    // --- HTF TP Upgrade Tracker ---
+    if(Use_HTF_TP_Upgrade) {
+        string tp_stat_txt = "Medium-Term Target (HTF TP): ";
+        color tp_stat_col = clrGray;
+        
+        bool rsi_up_met = (d_rsi_h1_value >= RSI_Strong_Up);
+        bool rsi_dn_met = (d_rsi_h1_value <= RSI_Strong_Dn);
+
+        if(rsi_up_met && rsi_dn_met) {
+            // Edge case where settings might be broken
+            tp_stat_txt += "ERROR: RSI thresholds overlapping";
+            tp_stat_col = clrRed;
+        } else if(rsi_up_met) {
+            tp_stat_txt += "ARMED for BUY (RSI >= " + DoubleToString(RSI_Strong_Up, 1) + ")";
+            tp_stat_col = clrDeepSkyBlue;
+        } else if(rsi_dn_met) {
+            tp_stat_txt += "ARMED for SELL (RSI <= " + DoubleToString(RSI_Strong_Dn, 1) + ")";
+            tp_stat_col = clrDeepSkyBlue;
+        } else {
+            tp_stat_txt += "WAITING Momentum (RSI between " + DoubleToString(RSI_Strong_Dn, 1) + " and " + DoubleToString(RSI_Strong_Up, 1) + ")";
+            tp_stat_col = clrDarkOrange;
+        }
+
+        DrawLabel("dash_live_tp_upg", tp_stat_txt, x, y+=gap, tp_stat_col);
+    } else {
+        DrawLabel("dash_live_tp_upg", "Medium-Term Target (HTF TP): DISABLED", x, y+=gap, clrGray);
     }
 
     // ==========================================
@@ -1893,8 +2472,71 @@ void DrawDashboard() {
             color mean_col  = at_loss ? clrDarkGoldenrod : clrDimGray;
             DrawLabel("dash_mean_loss", mean_txt, x, y+=gap, mean_col);
         }
+
+        string tp_lbl = "Target: ";
+        if(active_trade_is_upgraded) {
+             string tgt_name = (HTF_Upgrade_Target == TARGET_M5_MEAN) ? "M5 Mean" :
+                               (HTF_Upgrade_Target == TARGET_M5_OPP_BAND) ? "M5 Opp Band" :
+                               (HTF_Upgrade_Target == TARGET_H1_MEAN) ? "H1 Mean" :
+                               (HTF_Upgrade_Target == TARGET_H1_OPP_BAND) ? "H1 Opp Band" : "HTF";
+                               
+             if(HTF_TP_Execution_Mode == HTF_TP_STATIC) tgt_name += " [STATIC]";
+             else if(HTF_TP_Execution_Mode == HTF_TP_RANGE_PCT) tgt_name += StringFormat(" [%d%% RANGE]", HTF_TP_Range_Pct);
+
+             tp_lbl += "UPGRADED HTF [" + tgt_name + "] @ " + DoubleToString(dynamic_virtual_tp, 5);
+             
+             // Find current price depending on pos type
+             double cur_p = 0; int ptype = -1;
+             for(int i = 0; i < PositionsTotal(); i++) {
+                 if(PositionGetTicket(i) > 0 && PositionGetString(POSITION_SYMBOL) == _Symbol && PositionGetInteger(POSITION_MAGIC) == MagicNumber) {
+                     ptype   = (int)PositionGetInteger(POSITION_TYPE);
+                     cur_p   = ptype == POSITION_TYPE_BUY ? SymbolInfoDouble(_Symbol, SYMBOL_BID) : SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+                     break;
+                 }
+             }
+             string tp_dist_txt = "";
+             if(ptype != -1) {
+                 double dist_pts = 0.0;
+                 if(ptype == POSITION_TYPE_BUY) dist_pts = (dynamic_virtual_tp - cur_p) / _Point;
+                 else                           dist_pts = (cur_p - dynamic_virtual_tp) / _Point;
+                 if(dist_pts < 0) dist_pts = 0;
+                 
+                 if(HTF_TP_Execution_Mode == HTF_TP_RANGE_PCT) {
+                     double band_range_pts = 0.0;
+                     if(HTF_Upgrade_Target == TARGET_M5_MEAN || HTF_Upgrade_Target == TARGET_M5_OPP_BAND) {
+                          band_range_pts = (bb_up_m5[0] - bb_base_m5[0]) / _Point; // Mean to Band
+                     } else {
+                          band_range_pts = (bb_up_h1[0] - bb_base_h1[0]) / _Point; // Mean to Band
+                     }
+                     double dist_pct = 0.0;
+                     if(band_range_pts > 0) dist_pct = (dist_pts / band_range_pts) * 100.0;
+                     tp_dist_txt = StringFormat("       -> (Dist to TP: %.1f%% of Range)", dist_pct);
+                 } else {
+                     tp_dist_txt = StringFormat("       -> (Dist to TP: %.1f pts)", dist_pts);
+                 }
+             }
+             
+             DrawLabel("dash_tp", tp_lbl, x, y+=gap, clrDeepSkyBlue);
+             if(tp_dist_txt != "") DrawLabel("dash_tp_dist", tp_dist_txt, x, y+=gap, clrDeepSkyBlue);
+             else DrawLabel("dash_tp_dist", "", x, y, clrNONE);
+        } else {
+             string tgt_name = (TP_Type == TP_HALF_MEAN) ? "M1 Half Mean" : "M1 Mean";
+             tp_lbl += "Standard [" + tgt_name + "] @ " + DoubleToString(dynamic_virtual_tp, 5);
+             DrawLabel("dash_tp", tp_lbl, x, y+=gap, clrDarkGray);
+             DrawLabel("dash_tp_dist", "", x, y, clrNONE);
+        }
+
     } else {
-        DrawLabel("dash_div3", "", x, y+=gap, clrNONE); DrawLabel("dash_exit", "", x, y+=gap, clrNONE); DrawLabel("dash_mom", "", x, y+=gap, clrNONE); DrawLabel("dash_mean_loss", "", x, y+=gap, clrNONE);
+        DrawLabel("dash_div3", "", x, y+=gap, clrNONE); DrawLabel("dash_exit", "", x, y+=gap, clrNONE); DrawLabel("dash_mom", "", x, y+=gap, clrNONE); DrawLabel("dash_mean_loss", "", x, y+=gap, clrNONE); DrawLabel("dash_tp", "", x, y+=gap, clrNONE); DrawLabel("dash_tp_dist", "", x, y, clrNONE);
+    }
+
+    // --- Cleanup random orphans ---
+    int objs = ObjectsTotal(0, 0, OBJ_LABEL);
+    for(int i=objs-1; i>=0; i--) {
+        string n = ObjectName(0, i, 0, OBJ_LABEL);
+        if(StringFind(n, "dash_") != 0 && n == "Label") {
+            ObjectDelete(0, n);
+        }
     }
 }
 
@@ -1944,8 +2586,9 @@ void CheckEntry() {
 
     // Checklist implementation
     bool is_eod = IsEndOfDayRestricted();
+    bool is_hour_blocked = IsTradingHourBlocked();
     
-    bool effective_ranging_h1 = d_is_ranging || d_m1_is_ranging;
+    bool effective_ranging_h1 = d_is_ranging || (M1_Mom_Bypass_HTF && d_m1_is_ranging);
     bool effective_ranging_m5 = d_is_ranging || (M1_Mom_Bypass_MTF && d_m1_is_ranging);
 
     bool h1_buy_ok  = effective_ranging_h1 ? true : d_h1_buy;
@@ -1953,17 +2596,22 @@ void CheckEntry() {
     bool m5_buy_ok  = effective_ranging_m5 ? true : d_m5_buy;
     bool m5_sell_ok = effective_ranging_m5 ? true : d_m5_sell;
 
-    bool fib50_buy_ok = Use_Fib50_Filter ? (bid < d_fib50) : true;
-    bool fib50_sell_ok = Use_Fib50_Filter ? (ask > d_fib50) : true;
+    bool fib50_buy_ok = Use_Fib50_Filter ? (bid < d_fib_active_buy) : true;
+    bool fib50_sell_ok = Use_Fib50_Filter ? (ask > d_fib_active_sell) : true;
     
-    bool valid_buy_setup = (!d_is_news_time && !is_eod && h1_buy_ok && m5_buy_ok && fib50_buy_ok && d_clear_buy && d_sweep_buy && d_extreme_buy);
-    bool valid_sell_setup = (!d_is_news_time && !is_eod && h1_sell_ok && m5_sell_ok && fib50_sell_ok && d_clear_sell && d_sweep_sell && d_extreme_sell);
+    bool valid_buy_setup = (!d_is_news_time && !is_eod && !is_hour_blocked && h1_buy_ok && m5_buy_ok && fib50_buy_ok && d_clear_buy && d_sweep_buy && d_extreme_buy);
+    bool valid_sell_setup = (!d_is_news_time && !is_eod && !is_hour_blocked && h1_sell_ok && m5_sell_ok && fib50_sell_ok && d_clear_sell && d_sweep_sell && d_extreme_sell);
 
     if(Use_M1_Momentum) {
         if(d_m1_mom_trend == 1) { // Up momentum, block shorts
             valid_sell_setup = false;
         } else if(d_m1_mom_trend == -1) { // Down momentum, block longs
             valid_buy_setup = false;
+        } else if(!d_m1_is_ranging && !M1_Mom_Allow_Neutral) { 
+            // It's in the neutral zone (not trending, not strictly ranging).
+            // If we don't allow neutral, we block BOTH buy and sell in this intermediate state.
+            valid_buy_setup = false;
+            valid_sell_setup = false;
         }
     }
 
@@ -2030,6 +2678,10 @@ void CheckEntry() {
     if(time_sec <= 0) time_sec = 1;
     double real_time_speed = pips_diff / (double)time_sec;
 
+    double open_p_prev = iOpen(_Symbol, _Period, 1);
+    double close_p_prev = iClose(_Symbol, _Period, 1);
+    double prev_speed = ((close_p_prev - open_p_prev) / _Point) / PeriodSeconds(_Period);
+
     if(valid_buy_setup) {
         if(!IsSpeedAllowed(real_time_speed, AllowedSpeedRanges)) {
             valid_buy_setup = false; // Block if out of bounds
@@ -2043,19 +2695,27 @@ void CheckEntry() {
 
     if(valid_buy_setup) {
         if(Entry_Strategy == ENTRY_IMMEDIATE) { 
-            ExecuteBuy(ask, bid, current_bar_time, eff_sl_mult); 
+            ExecuteBuy(ask, bid, current_bar_time, real_time_speed, prev_speed, time_sec, eff_sl_mult); 
         } 
         else if(Entry_Strategy == ENTRY_DECELERATION) { 
             if(peak_buy_speed > 0 && current_speed <= (peak_buy_speed * (1.0 - Speed_Drop_Pct))) { 
-                ExecuteBuy(ask, bid, current_bar_time, eff_sl_mult); 
+                ExecuteBuy(ask, bid, current_bar_time, real_time_speed, prev_speed, time_sec, eff_sl_mult); 
                 peak_buy_speed = 0; 
             } 
         }
         else if(Entry_Strategy == ENTRY_DIRECTIONAL_STOP) {
             // Downward momentum peaked (negative values), market stopped (speed >= 0), and ticked up above Dir_Entry_Threshold
             if(peak_speed_down_for_buy < 0 && current_speed_down >= 0 && current_speed_up >= Dir_Entry_Threshold) {
-                ExecuteBuy(ask, bid, current_bar_time, eff_sl_mult);
+                ExecuteBuy(ask, bid, current_bar_time, real_time_speed, prev_speed, time_sec, eff_sl_mult);
                 peak_speed_down_for_buy = 0;
+            }
+        }
+        else if(Entry_Strategy == ENTRY_DIR_STOP_RELATIVE) {
+            double bar_age_pct = (double)time_sec / (double)PeriodSeconds(_Period);
+            double reference_speed = (bar_age_pct < Dir_Relative_Time_Pct) ? prev_speed : real_time_speed;
+            double req_speed = MathMax(Dir_Relative_Min, MathAbs(reference_speed) * Dir_Relative_Ratio);
+            if(current_speed_down >= 0 && current_speed_up >= req_speed) {
+                ExecuteBuy(ask, bid, current_bar_time, real_time_speed, prev_speed, time_sec, eff_sl_mult);
             }
         }
     } else if (Entry_Strategy == ENTRY_DECELERATION) { 
@@ -2066,19 +2726,27 @@ void CheckEntry() {
 
     if(valid_sell_setup) {
         if(Entry_Strategy == ENTRY_IMMEDIATE) { 
-            ExecuteSell(bid, ask, current_bar_time, eff_sl_mult); 
+            ExecuteSell(bid, ask, current_bar_time, real_time_speed, prev_speed, time_sec, eff_sl_mult); 
         } 
         else if(Entry_Strategy == ENTRY_DECELERATION) { 
             if(peak_sell_speed > 0 && current_speed <= (peak_sell_speed * (1.0 - Speed_Drop_Pct))) { 
-                ExecuteSell(bid, ask, current_bar_time, eff_sl_mult); 
+                ExecuteSell(bid, ask, current_bar_time, real_time_speed, prev_speed, time_sec, eff_sl_mult); 
                 peak_sell_speed = 0; 
             } 
         }
         else if(Entry_Strategy == ENTRY_DIRECTIONAL_STOP) {
             // Upward momentum peaked, market stopped (speed <= 0), and ticked down above Dir_Entry_Threshold (negative tick)
             if(peak_speed_up_for_sell > 0 && current_speed_up <= 0 && current_speed_down <= -Dir_Entry_Threshold) {
-                ExecuteSell(bid, ask, current_bar_time, eff_sl_mult);
+                ExecuteSell(bid, ask, current_bar_time, real_time_speed, prev_speed, time_sec, eff_sl_mult);
                 peak_speed_up_for_sell = 0;
+            }
+        }
+        else if(Entry_Strategy == ENTRY_DIR_STOP_RELATIVE) {
+            double bar_age_pct = (double)time_sec / (double)PeriodSeconds(_Period);
+            double reference_speed = (bar_age_pct < Dir_Relative_Time_Pct) ? prev_speed : real_time_speed;
+            double req_speed = MathMax(Dir_Relative_Min, MathAbs(reference_speed) * Dir_Relative_Ratio);
+            if(current_speed_up <= 0 && current_speed_down <= -req_speed) {
+                ExecuteSell(bid, ask, current_bar_time, real_time_speed, prev_speed, time_sec, eff_sl_mult);
             }
         }
     } else if (Entry_Strategy == ENTRY_DECELERATION) { 
@@ -2104,68 +2772,78 @@ double CalcLotSize(double sl_price_distance) {
     lot = MathMax(min_lot, MathMin(max_lot, lot)); // clamp to broker limits
     return lot;
 }
-void ExecuteBuy(double ask, double bid, datetime bar_time, double sl_mult = -1) {
+void ExecuteBuy(double ask, double bid, datetime bar_time, double live_speed, double prev_speed, long time_sec, double sl_mult = -1) {
     if(sl_mult < 0) sl_mult = SL_ATR_Multiplier;
     double sl_dist = sl_mult * atr_m1[0];
     double sl      = bid - sl_dist;
     double lots    = CalcLotSize(sl_dist);
     
-    // Live average candle speed calculation for order comment
-    double open_p = iOpen(_Symbol, _Period, 0);
-    double close_p = iClose(_Symbol, _Period, 0); // same as current price
-    double pips_diff = (close_p - open_p) / _Point; // negative for down candle
-    long time_sec = TimeCurrent() - bar_time;
-    if(time_sec <= 0) time_sec = 1;
-    double pips_per_sec = pips_diff / (double)time_sec;
-    string cmt = StringFormat("BB Buy | %.2f pts/s", pips_per_sec);
+    string cmt = StringFormat("B|%.2f|%.2f|%d", live_speed, prev_speed, time_sec);
     
-    if(trade.Buy(lots, _Symbol, ask, sl, 0, cmt)) { last_trade_bar = bar_time; InitDynamicTP(ask, true); }
+    bool trade_exec = trade.Buy(lots, _Symbol, ask, sl, 0, cmt);
+    if(trade_exec) {
+        double atr_val = 0; if (ArraySize(atr_m1) > 0) atr_val = atr_m1[0];
+        PrintFormat("BUY ENTRY! Price: %.5f | SL: %.5f | Speed: %.2f | ATR: %.5f", ask, sl, peak_buy_speed, atr_val);
+        last_trade_bar = bar_time;
+        InitDynamicTP(ask, true);
+        // Log executions for Big Move Bypass
+        if (d_bm_armed_buy) bm_trades_taken++;
+    }
 }
-void ExecuteSell(double bid, double ask, datetime bar_time, double sl_mult = -1) {
+void ExecuteSell(double bid, double ask, datetime bar_time, double live_speed, double prev_speed, long time_sec, double sl_mult = -1) {
     if(sl_mult < 0) sl_mult = SL_ATR_Multiplier;
-    double sl_dist = sl_mult * atr_m1[0];
-    double sl      = ask + sl_dist;
-    double lots    = CalcLotSize(sl_dist);
+    double atr_val = 0; if (ArraySize(atr_m1) > 0) atr_val = atr_m1[0];
+    double sl = bid + (atr_val * sl_mult);
     
-    // Live average candle speed calculation for order comment
-    double open_p = iOpen(_Symbol, _Period, 0);
-    double close_p = iClose(_Symbol, _Period, 0); // same as current price
-    double pips_diff = (close_p - open_p) / _Point; // negative for down candle
-    long time_sec = TimeCurrent() - bar_time;
-    if(time_sec <= 0) time_sec = 1;
-    double pips_per_sec = pips_diff / (double)time_sec;
-    string cmt = StringFormat("BB Sell | %.2f pts/s", pips_per_sec);
+    // Convert to exact pip values for the broker
+    sl = NormalizeDouble(sl, _Digits);
+
+    double lots = CalcLotSize(MathAbs(bid - sl));
+    if (lots <= 0) { Print("Lot size 0, aborting trade."); return; }
     
-    if(trade.Sell(lots, _Symbol, bid, sl, 0, cmt)) { last_trade_bar = bar_time; InitDynamicTP(bid, false); }
+    string cmt = StringFormat("S|%.2f|%.2f|%d", live_speed, prev_speed, time_sec);
+
+    bool trade_exec = trade.Sell(lots, _Symbol, bid, sl, 0, cmt);
+    if(trade_exec) {
+        PrintFormat("SELL ENTRY! Price: %.5f | SL: %.5f | Speed: %.2f | ATR: %.5f", bid, sl, peak_sell_speed, atr_val);
+        last_trade_bar = bar_time;
+        InitDynamicTP(bid, false);
+        // Log executions for Big Move Bypass
+        if (d_bm_armed_sell) bm_trades_taken++;
+    }
 }
 
 //+------------------------------------------------------------------+
 //| REAL-TIME Cluster-Aware & Deep Sweep Logic                       |
 //+------------------------------------------------------------------+
-bool CheckLiquiditySweepRealTime(bool isBuy, double current_price) {
+bool CheckLiquiditySweepRealTime(bool isBuy, double current_price, string &out_type, double &out_price, bool disable_deep_sweep = false) {
     double cluster_dist = atr_m1[0] * ClusterToleranceATR; bool valid_sweep_found = false;
     if(isBuy) {
         for(int i = 0; i < ArraySize(active_supports); i++) {
-            double raw_sup_price = active_supports[i].price; double trigger_price = raw_sup_price; if(active_supports[i].deep_sweep) trigger_price -= (atr_m1[0] * DeepSweep_ATR);
+            bool apply_deep = active_supports[i].deep_sweep && !disable_deep_sweep;
+            double raw_sup_price = active_supports[i].price; double trigger_price = raw_sup_price; if(apply_deep) trigger_price -= (atr_m1[0] * DeepSweep_ATR);
             if(current_price <= trigger_price) {
                 bool lower_cluster_unswept = false;
                 for(int j = 0; j < ArraySize(active_supports); j++) {
                     double other_sup = active_supports[j].price;
-                    if(other_sup < raw_sup_price && (raw_sup_price - other_sup) <= cluster_dist) { double other_trigger = other_sup; if(active_supports[j].deep_sweep) other_trigger -= (atr_m1[0] * DeepSweep_ATR); if(current_price > other_trigger) { lower_cluster_unswept = true; break; } }
+                    bool apply_deep_other = active_supports[j].deep_sweep && !disable_deep_sweep;
+                    if(other_sup < raw_sup_price && (raw_sup_price - other_sup) <= cluster_dist) { double other_trigger = other_sup; if(apply_deep_other) other_trigger -= (atr_m1[0] * DeepSweep_ATR); if(current_price > other_trigger) { lower_cluster_unswept = true; break; } }
                 }
-                if(!lower_cluster_unswept) { valid_sweep_found = true; break; }
+                if(!lower_cluster_unswept) { valid_sweep_found = true; out_type = active_supports[i].type; out_price = active_supports[i].price; break; }
             }
         }
     } else {
         for(int i = 0; i < ArraySize(active_resistances); i++) {
-            double raw_res_price = active_resistances[i].price; double trigger_price = raw_res_price; if(active_resistances[i].deep_sweep) trigger_price += (atr_m1[0] * DeepSweep_ATR);
+            bool apply_deep = active_resistances[i].deep_sweep && !disable_deep_sweep;
+            double raw_res_price = active_resistances[i].price; double trigger_price = raw_res_price; if(apply_deep) trigger_price += (atr_m1[0] * DeepSweep_ATR);
             if(current_price >= trigger_price) {
                 bool higher_cluster_unswept = false;
                 for(int j = 0; j < ArraySize(active_resistances); j++) {
                     double other_res = active_resistances[j].price;
-                    if(other_res > raw_res_price && (other_res - raw_res_price) <= cluster_dist) { double other_trigger = other_res; if(active_resistances[j].deep_sweep) other_trigger += (atr_m1[0] * DeepSweep_ATR); if(current_price < other_trigger) { higher_cluster_unswept = true; break; } }
+                    bool apply_deep_other = active_resistances[j].deep_sweep && !disable_deep_sweep;
+                    if(other_res > raw_res_price && (other_res - raw_res_price) <= cluster_dist) { double other_trigger = other_res; if(apply_deep_other) other_trigger += (atr_m1[0] * DeepSweep_ATR); if(current_price < other_trigger) { higher_cluster_unswept = true; break; } }
                 }
-                if(!higher_cluster_unswept) { valid_sweep_found = true; break; }
+                if(!higher_cluster_unswept) { valid_sweep_found = true; out_type = active_resistances[i].type; out_price = active_resistances[i].price; break; }
             }
         }
     }
@@ -2323,6 +3001,9 @@ void UpdateVisuals() {
 
     // NEW: Draw Historical Candle Speeds
     DrawCandleSpeeds();
+    
+    // NEW: Draw M1 Bypass Zones
+    DrawM1BypassZones();
 }
 
 //+------------------------------------------------------------------+
@@ -2497,6 +3178,64 @@ void DrawM1MomentumPoints() {
             ObjectSetDouble(0, obj_name, OBJPROP_PRICE, target_price);
             ObjectSetInteger(0, obj_name, OBJPROP_COLOR, target_color);
         }
+    }
+}
+
+//+------------------------------------------------------------------+
+//| M1 Bypass Zones Visuals                                          |
+//+------------------------------------------------------------------+
+void DrawM1BypassZones() {
+    string push_zone_name = "vis_mb_push";
+    string prev_zone_name = "vis_mb_prev";
+    
+    if(!M1_Mom_Bypass_Extreme || g_mb_start_idx == -1) {
+        ObjectDelete(0, push_zone_name);
+        ObjectDelete(0, prev_zone_name);
+        return;
+    }
+    
+    double push_max = 0, push_min = 999999;
+    for(int k=MathMin(g_mb_end_idx, g_mb_start_idx); k<=MathMax(g_mb_end_idx, g_mb_start_idx); k++) {
+        if(iHigh(_Symbol, _Period, k) > push_max) push_max = iHigh(_Symbol, _Period, k);
+        if(iLow(_Symbol, _Period, k)  < push_min) push_min = iLow(_Symbol, _Period, k);
+    }
+    
+    double prev_max = 0, prev_min = 999999;
+    for(int k=MathMin(g_mb_prev_end_idx, g_mb_prev_start_idx); k<=MathMax(g_mb_prev_end_idx, g_mb_prev_start_idx); k++) {
+        if(iHigh(_Symbol, _Period, k) > prev_max) prev_max = iHigh(_Symbol, _Period, k);
+        if(iLow(_Symbol, _Period, k)  < prev_min) prev_min = iLow(_Symbol, _Period, k);
+    }
+    
+    datetime push_time1 = iTime(_Symbol, _Period, g_mb_start_idx);
+    datetime push_time2 = iTime(_Symbol, _Period, g_mb_end_idx);
+    datetime prev_time1 = iTime(_Symbol, _Period, g_mb_prev_start_idx);
+    datetime prev_time2 = iTime(_Symbol, _Period, g_mb_prev_end_idx);
+
+    // Draw push zone
+    if(ObjectFind(0, push_zone_name) < 0) {
+        ObjectCreate(0, push_zone_name, OBJ_RECTANGLE, 0, push_time1, push_max, push_time2, push_min);
+        ObjectSetInteger(0, push_zone_name, OBJPROP_COLOR, (g_mb_trend_dir == 1 ? clrLightGreen : clrLightPink));
+        ObjectSetInteger(0, push_zone_name, OBJPROP_BACK, true);
+        ObjectSetInteger(0, push_zone_name, OBJPROP_FILL, true);
+    } else {
+        ObjectSetInteger(0, push_zone_name, OBJPROP_TIME, 0, push_time1);
+        ObjectSetDouble(0, push_zone_name, OBJPROP_PRICE, 0, push_max);
+        ObjectSetInteger(0, push_zone_name, OBJPROP_TIME, 1, push_time2);
+        ObjectSetDouble(0, push_zone_name, OBJPROP_PRICE, 1, push_min);
+        ObjectSetInteger(0, push_zone_name, OBJPROP_COLOR, (g_mb_trend_dir == 1 ? clrLightGreen : clrLightPink));
+    }
+    
+    // Draw prev zone
+    if(ObjectFind(0, prev_zone_name) < 0) {
+        ObjectCreate(0, prev_zone_name, OBJ_RECTANGLE, 0, prev_time1, prev_max, prev_time2, prev_min);
+        ObjectSetInteger(0, prev_zone_name, OBJPROP_COLOR, clrSilver);
+        ObjectSetInteger(0, prev_zone_name, OBJPROP_BACK, true);
+        ObjectSetInteger(0, prev_zone_name, OBJPROP_FILL, true);
+    } else {
+        ObjectSetInteger(0, prev_zone_name, OBJPROP_TIME, 0, prev_time1);
+        ObjectSetDouble(0, prev_zone_name, OBJPROP_PRICE, 0, prev_max);
+        ObjectSetInteger(0, prev_zone_name, OBJPROP_TIME, 1, prev_time2);
+        ObjectSetDouble(0, prev_zone_name, OBJPROP_PRICE, 1, prev_min);
     }
 }
 
@@ -2690,7 +3429,7 @@ void DrawLiquidityLine(string name, datetime t1, double price, datetime t2, stri
         ObjectDelete(0, text_name); // remove if it was previously created
     }
 }
-void UpdateFibo(datetime t1, double p1, datetime t2, double p2) { string name = "visual_swing_fibo"; if(ObjectFind(0, name) < 0) { ObjectCreate(0, name, OBJ_FIBO, 0, t1, p1, t2, p2); ObjectSetInteger(0, name, OBJPROP_COLOR, clrPurple); ObjectSetInteger(0, name, OBJPROP_LEVELCOLOR, clrPurple); ObjectSetInteger(0, name, OBJPROP_RAY_RIGHT, false); ObjectSetInteger(0, name, OBJPROP_LEVELS, 3); ObjectSetDouble(0, name, OBJPROP_LEVELVALUE, 0, 0.0); ObjectSetString(0, name, OBJPROP_LEVELTEXT, 0, "0.0"); ObjectSetDouble(0, name, OBJPROP_LEVELVALUE, 1, 0.5); ObjectSetString(0, name, OBJPROP_LEVELTEXT, 1, "50.0 (%)"); ObjectSetDouble(0, name, OBJPROP_LEVELVALUE, 2, 1.0); ObjectSetString(0, name, OBJPROP_LEVELTEXT, 2, "100.0"); } else { ObjectSetInteger(0, name, OBJPROP_TIME, 0, t1); ObjectSetDouble(0, name, OBJPROP_PRICE, 0, p1); ObjectSetInteger(0, name, OBJPROP_TIME, 1, t2); ObjectSetDouble(0, name, OBJPROP_PRICE, 1, p2); } }
+void UpdateFibo(datetime t1, double p1, datetime t2, double p2) { string name = "visual_swing_fibo"; if(ObjectFind(0, name) < 0) { ObjectCreate(0, name, OBJ_FIBO, 0, t1, p1, t2, p2); ObjectSetInteger(0, name, OBJPROP_COLOR, clrPurple); ObjectSetInteger(0, name, OBJPROP_LEVELCOLOR, clrPurple); ObjectSetInteger(0, name, OBJPROP_RAY_RIGHT, false); ObjectSetInteger(0, name, OBJPROP_LEVELS, 5); ObjectSetDouble(0, name, OBJPROP_LEVELVALUE, 0, 0.0); ObjectSetString(0, name, OBJPROP_LEVELTEXT, 0, "0.0"); ObjectSetDouble(0, name, OBJPROP_LEVELVALUE, 1, 0.382); ObjectSetString(0, name, OBJPROP_LEVELTEXT, 1, "38.2 (%)"); ObjectSetDouble(0, name, OBJPROP_LEVELVALUE, 2, 0.5); ObjectSetString(0, name, OBJPROP_LEVELTEXT, 2, "50.0 (%)"); ObjectSetDouble(0, name, OBJPROP_LEVELVALUE, 3, 0.618); ObjectSetString(0, name, OBJPROP_LEVELTEXT, 3, "61.8 (%)"); ObjectSetDouble(0, name, OBJPROP_LEVELVALUE, 4, 1.0); ObjectSetString(0, name, OBJPROP_LEVELTEXT, 4, "100.0"); } else { ObjectSetInteger(0, name, OBJPROP_TIME, 0, t1); ObjectSetDouble(0, name, OBJPROP_PRICE, 0, p1); ObjectSetInteger(0, name, OBJPROP_TIME, 1, t2); ObjectSetDouble(0, name, OBJPROP_PRICE, 1, p2); } }
 
 //+------------------------------------------------------------------+
 //| MSS Fractal Level Helpers                                        |
@@ -2788,17 +3527,15 @@ void ManageOpenTrades() {
             if(entry_bar < 0) entry_bar = 0; 
 
             // 0. HTF Squeeze Emergency Exit (highest priority — protects from squeeze explosion)
-            if(Exit_Trade_On_H1_Squeeze && h1_squeeze_danger) {
-                trade.PositionClose(ticket);
-                continue;
-            }
-            if(Exit_Trade_On_M5_Squeeze && m5_squeeze_danger) {
-                trade.PositionClose(ticket);
-                continue;
-            }
-            if(Exit_Trade_On_M1_Squeeze && m1_squeeze_danger) {
-                trade.PositionClose(ticket);
-                continue;
+            bool bypass_sqz = (active_trade_is_upgraded && Bypass_Squeeze_Exit_On_HTF);
+            
+            if(!bypass_sqz) {
+                if((Exit_Trade_On_H1_Squeeze && h1_squeeze_danger) ||
+                   (Exit_Trade_On_M5_Squeeze && m5_squeeze_danger) ||
+                   (Exit_Trade_On_M1_Squeeze && m1_squeeze_danger)) {
+                    trade.PositionClose(ticket);
+                    continue;
+                }
             }
 
             // 1. Initialize Trackers for new trades
@@ -2807,6 +3544,8 @@ void ManageOpenTrades() {
                 bos_armed = false;
                 tracked_struct_level = 0.0;
                 trade_start_time = open_time;
+                // DO NOT overwrite active_trade_is_upgraded here!
+                // It was just calculated and set in CheckEntry() -> InitDynamicTP()
                 
                 // Evaluate Momentum Spike Condition at Entry (Shifted ATR)
                 trade_is_spike = true; 
@@ -2994,8 +3733,12 @@ void ManageOpenTrades() {
             // A. Ultimate Momentum Target: Opposite Band Tolerance
             bool hit_opposite_target = false;
             double band_width = bb_up_m1[0] - bb_dn_m1[0];
-            if(pos_type == POSITION_TYPE_BUY  && current_price >= (bb_up_m1[0] - (band_width * Opposite_Band_Tolerance))) hit_opposite_target = true;
-            if(pos_type == POSITION_TYPE_SELL && current_price <= (bb_dn_m1[0] + (band_width * Opposite_Band_Tolerance))) hit_opposite_target = true;
+            
+            // Bypass the M1 opposite band exit if this is an upgraded HTF trade
+            if(!active_trade_is_upgraded) {
+                if(pos_type == POSITION_TYPE_BUY  && current_price >= (bb_up_m1[0] - (band_width * Opposite_Band_Tolerance))) hit_opposite_target = true;
+                if(pos_type == POSITION_TYPE_SELL && current_price <= (bb_dn_m1[0] + (band_width * Opposite_Band_Tolerance))) hit_opposite_target = true;
+            }
 
             bool had_fast_push = false;
             if(Use_Momentum_Hold && d_pure_momentum) {
@@ -3043,9 +3786,75 @@ void ManageOpenTrades() {
     }
 }
 
-void InitDynamicTP(double open_price, bool isBuy) { dynamic_virtual_tp = isBuy ? 999999.0 : 0.000001; CalculateDynamicTP(open_price, isBuy); }
+void InitDynamicTP(double open_price, bool isBuy) { 
+    dynamic_virtual_tp = isBuy ? 999999.0 : 0.000001; 
+    locked_htf_virtual_tp = 0.0; // Reset for new trade
+    
+    active_trade_is_upgraded = false;
+    if(Use_HTF_TP_Upgrade) {
+        if(isBuy && d_rsi_h1_value >= RSI_Strong_Up) active_trade_is_upgraded = true;
+        if(!isBuy && d_rsi_h1_value <= RSI_Strong_Dn) active_trade_is_upgraded = true;
+    }
+    
+    CalculateDynamicTP(open_price, isBuy); 
+    
+    // Once the initial dynamic TP is calculated for the HTF target, lock it down
+    // and apply a 1 ATR deviation to make it reachable.
+    if(active_trade_is_upgraded && HTF_TP_Execution_Mode == HTF_TP_STATIC) {
+        double atr_val = (ArraySize(atr_m1) > 0) ? atr_m1[0] : 0.0;
+        if(isBuy) {
+            locked_htf_virtual_tp = dynamic_virtual_tp - atr_val;
+            if(locked_htf_virtual_tp < bb_base_m1[0]) locked_htf_virtual_tp = bb_base_m1[0]; // floor limit
+        } else {
+            locked_htf_virtual_tp = dynamic_virtual_tp + atr_val;
+            if(locked_htf_virtual_tp > bb_base_m1[0]) locked_htf_virtual_tp = bb_base_m1[0]; // ceil limit
+        }
+        dynamic_virtual_tp = locked_htf_virtual_tp;
+    }
+}
+
 void CalculateDynamicTP(double open_price, bool isBuy) {
+    // Standard Target
     double target_price = TP_Type == TP_HALF_MEAN ? open_price + ((bb_base_m1[0] - open_price) / 2.0) : bb_base_m1[0];
+    
+    if(active_trade_is_upgraded) {
+        if(HTF_TP_Execution_Mode == HTF_TP_STATIC && locked_htf_virtual_tp > 0.0) {
+            dynamic_virtual_tp = locked_htf_virtual_tp;
+            return;
+        }
+
+        double band_range = 0.0;
+
+        if(HTF_Upgrade_Target == TARGET_M5_MEAN) {
+            target_price = bb_base_m5[0];
+            band_range = bb_up_m5[0] - bb_base_m5[0];
+        } else if(HTF_Upgrade_Target == TARGET_M5_OPP_BAND) {
+            target_price = isBuy ? bb_up_m5[0] : bb_dn_m5[0];
+            band_range = bb_up_m5[0] - bb_base_m5[0];
+        } else if(HTF_Upgrade_Target == TARGET_H1_MEAN) {
+            target_price = bb_base_h1[0];
+            band_range = bb_up_h1[0] - bb_base_h1[0];
+        } else if(HTF_Upgrade_Target == TARGET_H1_OPP_BAND) {
+            target_price = isBuy ? bb_up_h1[0] : bb_dn_h1[0];
+            band_range = bb_up_h1[0] - bb_base_h1[0];
+        }
+        
+        // Apply Range Offset if enabled
+        if(HTF_TP_Execution_Mode == HTF_TP_RANGE_PCT && band_range > 0.0) {
+            double offset  = band_range * (HTF_TP_Range_Pct / 100.0);
+            if(isBuy) target_price -= offset;
+            else      target_price += offset;
+        }
+        
+        // Ensure the upgrade target is actually better than the standard M1 target
+        if(isBuy && target_price < bb_base_m1[0]) target_price = bb_base_m1[0];
+        if(!isBuy && target_price > bb_base_m1[0]) target_price = bb_base_m1[0];
+        
+        // Curve smoothly with the HTF band
+        dynamic_virtual_tp = target_price;
+        return;
+    }
+
     if(isBuy) { if(target_price < dynamic_virtual_tp) dynamic_virtual_tp = target_price; } 
     else      { if(target_price > dynamic_virtual_tp) dynamic_virtual_tp = target_price; }
 }

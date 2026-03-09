@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>4D Speed Analysis Demo</title>
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #121212;
+            color: #ffffff;
+        }
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        .header p {
+            color: #a0a0a0;
+        }
+        .chart-wrapper {
+            background-color: #1e1e1e;
+            padding: 10px;
+            border-radius: 12px;
+            box-shadow: 0 8px 16px rgba(0,0,0,0.5);
+        }
+        #chart {
+            width: 100%;
+            height: 700px;
+        }
+        .explanation {
+            margin-top: 30px;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+        }
+        .card {
+            background-color: #1e1e1e;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+            border-left: 4px solid #555;
+        }
+        .card h3 {
+            margin-top: 0;
+        }
+        .card p {
+            color: #ccc;
+            line-height: 1.5;
+            font-size: 0.95em;
+        }
+        .card.loss { border-left-color: #ff3333; }
+        .card.win { border-left-color: #33ff33; }
+        .card.neutral { border-left-color: #aaaaaa; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="header">
+        <h1>4D Speed Momentum Analysis</h1>
+        <p>Explore the relationship between Previous Speed, Current Speed, Time Since Candle Open, and Net Profit.</p>
+        <p><strong>X-Axis:</strong> Prev Candle Speed | <strong>Y-Axis:</strong> Curr Candle Speed | <strong>Z-Axis:</strong> Time Since Open (sec) | <strong>Color:</strong> Net Profit</p>
+    </div>
+
+    <div class="chart-wrapper">
+        <div id="chart"></div>
+    </div>
+
+    <div class="explanation">
+        <div class="card loss">
+            <h3 style="color: #ff5555;">Cluster 1: Early Fakeouts (Losses)</h3>
+            <p><strong>Location:</strong> Low Z (0-10 sec), High Y (Current Speed), Low X (Prev Speed).</p>
+            <p><strong>Why:</strong> The previous candle was dead. Suddenly, at the open of a new candle, there's a huge speed spike. Because the time since open is so small, 1 or 2 fast ticks make the "average speed" look massive. It's usually noise or a stop hunt, trapping early breakout traders.</p>
+        </div>
+
+        <div class="card win">
+            <h3 style="color: #55ff55;">Cluster 2: True Momentum (Wins)</h3>
+            <p><strong>Location:</strong> Mid Z (15-45 sec), High Y (Current Speed), High X (Prev Speed).</p>
+            <p><strong>Why:</strong> The previous candle already established sustained momentum. The current candle is 15+ seconds in and is STILL maintaining high speed. This indicates real, sustained institutional volume pushing the market. These are the golden setups.</p>
+        </div>
+
+        <div class="card neutral">
+            <h3 style="color: #aaaaaa;">Cluster 3: Exhaustion (Mixed/Losses)</h3>
+            <p><strong>Location:</strong> Any Z, Low Y (Current Speed), High X (Prev Speed).</p>
+            <p><strong>Why:</strong> The previous candle was moving extremely fast. Now, the current candle's speed has dropped off significantly. Entering here means you are likely buying the top or selling the bottom right before a pullback. Results are mixed to negative.</p>
+        </div>
+
+        <div class="card neutral">
+            <h3 style="color: #aaaaaa;">Cluster 4: Random Noise</h3>
+            <p><strong>Location:</strong> Scattered across middle values.</p>
+            <p><strong>Why:</strong> Average previous speed, average current speed. Choppy conditions resulting in break-even noise or spread out results.</p>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Helper to generate random numbers
+    function rand(min, max) { return Math.random() * (max - min) + min; }
+
+    const prev_speed = [];
+    const curr_speed = [];
+    const time_open = [];
+    const net_result = [];
+    const texts = [];
+
+    // --- GENERATE DUMMY DATA BASED ON OUR HYPOTHESES ---
+
+    // 1. Early Fakeouts (Red Cluster)
+    // Low previous speed (0-2), High current speed (5-10), Low time since open (1-10s)
+    for(let i=0; i<40; i++) {
+        prev_speed.push(rand(0.5, 2.0));
+        curr_speed.push(rand(5.0, 10.0));
+        time_open.push(rand(1, 10)); 
+        let result = rand(-60, -10); // Consistent losses
+        net_result.push(result);
+        texts.push(`Fakeout<br>Net: $${result.toFixed(2)}`);
+    }
+
+    // 2. True Momentum (Green Cluster)
+    // High previous speed (4-8), High current speed (4-9), Mid/Late time (15-45s)
+    for(let i=0; i<50; i++) {
+        prev_speed.push(rand(4.0, 8.0));
+        curr_speed.push(rand(4.0, 9.0));
+        time_open.push(rand(15, 45)); 
+        let result = rand(20, 80); // Consistent wins
+        net_result.push(result);
+        texts.push(`True Momentum<br>Net: +$${result.toFixed(2)}`);
+    }
+
+    // 3. Exhaustion (Red/Gray Cluster)
+    // High previous speed (7-12), Low current speed (1-3), Any time
+    for(let i=0; i<30; i++) {
+        prev_speed.push(rand(7.0, 12.0));
+        curr_speed.push(rand(1.0, 3.0));
+        time_open.push(rand(5, 55)); 
+        let result = rand(-40, 5); // Mostly losses, some scratch trades
+        net_result.push(result);
+        texts.push(`Exhaustion<br>Net: $${result.toFixed(2)}`);
+    }
+
+    // 4. Random Noise (Gray Cluster - Middle spread)
+    for(let i=0; i<60; i++) {
+        prev_speed.push(rand(2.0, 5.0));
+        curr_speed.push(rand(2.0, 5.0));
+        time_open.push(rand(10, 50)); 
+        let result = rand(-25, 25); // Choppy
+        net_result.push(result);
+        texts.push(`Noise<br>Net: $${result.toFixed(2)}`);
+    }
+
+    // --- PLOTLY SETUP ---
+    const trace = {
+        x: prev_speed,
+        y: curr_speed,
+        z: time_open,
+        mode: 'markers',
+        marker: {
+            size: 8,
+            color: net_result,
+            colorscale: [
+                [0, 'rgb(255, 50, 50)'],     // Red for loss
+                [0.5, 'rgb(150, 150, 150)'],  // Gray for break-even
+                [1, 'rgb(50, 255, 50)']      // Green for win
+            ],
+            cmin: -60,
+            cmax: 60,
+            colorbar: {
+                title: 'Net Profit ($)',
+                tickfont: {color: '#e0e0e0'},
+                titlefont: {color: '#e0e0e0'}
+            },
+            opacity: 0.9,
+            line: {
+                width: 0.5,
+                color: '#121212'
+            }
+        },
+        text: texts,
+        hoverinfo: 'x+y+z+text',
+        type: 'scatter3d'
+    };
+
+    const layout = {
+        paper_bgcolor: '#1e1e1e',
+        plot_bgcolor: '#1e1e1e',
+        font: { color: '#e0e0e0', family: 'system-ui, sans-serif' },
+        scene: {
+            xaxis: { title: 'Prev Speed (pips/s)', backgroundcolor: '#1e1e1e', gridcolor: '#333' },
+            yaxis: { title: 'Curr Speed (pips/s)', backgroundcolor: '#1e1e1e', gridcolor: '#333' },
+            zaxis: { title: 'Time Since Open (s)', backgroundcolor: '#1e1e1e', gridcolor: '#333' },
+            bgcolor: '#1e1e1e'
+        },
+        margin: { l: 0, r: 0, b: 0, t: 0 }
+    };
+
+    const config = { responsive: true, displayModeBar: true };
+
+    Plotly.newPlot('chart', [trace], layout, config);
+</script>
+
+</body>
+</html>

@@ -183,12 +183,7 @@ input double               EqualThresholdATR = 0.2;
 input double               ClusterToleranceATR = 2.0; 
 input int                  MajorSwingCandles = 15; 
 
-input string               __BigMove_Bypass__   = "=== 6b. Big Move M1 Extreme Bypass ===";
-input bool                 Use_BigMove_Bypass   = true;     // [TOGGLE] Bypass M1 extreme after a big move
-input int                  BigMove_Lookback     = 20;       // Bars to look back for the big move
-input double               BigMove_ATR_Mult     = 3.0;      // Move must be > X times ATR
-input int                  BigMove_Max_Trades   = 2;        // Max bypass trades allowed per setup
-input double               BigMove_Near_Pct     = 0.10;     // Allow entry if price is within this % of the M1 band range
+
 
 input string               __DeepSweep__ = "=== 7. Deep Sweep Logic ===";
 input bool                 Use_Deep_Sweep = true;  // [TOGGLE] Require deeper sweeps for Major/EQ levels
@@ -270,9 +265,7 @@ int handle_ADX_Ranging;
 int handle_RSI_H1;     // NEW: H1 RSI indicator handle
 int handle_RSI_M5;     // NEW: M5 RSI indicator handle
 
-// Big Move State Tracking
-int bm_state = 0;         // 0=Neutral, 1=BigDown(WaitMid), 2=ArmedBuy, -1=BigUp(WaitMid), -2=ArmedSell
-int bm_trades_taken = 0;  // Count how many bypass trades have been executed
+
 int handle_Crawl_MA;
 
 double atr_m1[], atr_m5[], atr_h1[];
@@ -330,7 +323,7 @@ datetime sweep_buy_bar = 0;
 datetime sweep_sell_bar = 0;
 bool d_extreme_buy, d_extreme_sell;
 bool d_sqz_m1, d_sqz_m5, d_sqz_h1, is_squeeze;
-bool d_bm_armed_buy, d_bm_armed_sell;
+
 bool d_is_news_time = false;
 int d_h1_trend = 0; 
 int d_m5_trend = 0; 
@@ -1379,78 +1372,7 @@ void EvaluateDashboardStates() {
         }
     }
 
-    // --- Big Move State Machine ---
-    d_bm_armed_buy = false;
-    d_bm_armed_sell = false;
-    
-    if(Use_BigMove_Bypass) {
-        double m1_range = (bb_up_m1[0] - bb_dn_m1[0]);
-        double near_dist = m1_range * BigMove_Near_Pct;
-        
-        // 1. Detect big moves (if currently Neutral or looking for a fresh move)
-        if(bm_state == 0 && atr_m1[0] > 0) {
-            double max_h = 0.0, min_l = 999999.0;
-            for(int k=0; k<MathMin(BigMove_Lookback, ArraySize(atr_m1)); k++) {
-                if(iHigh(_Symbol, _Period, k) > max_h) max_h = iHigh(_Symbol, _Period, k);
-                if(iLow(_Symbol, _Period, k) < min_l) min_l = iLow(_Symbol, _Period, k);
-            }
-            double range = max_h - min_l;
-            double required = BigMove_ATR_Mult * atr_m1[CT_Spike_ATR_Shift]; // using established safe ATR
-            
-            if(range >= required) {
-                // If current price is low, it's a big move DOWN
-                if(bid <= bb_base_m1[0]) {
-                    bm_state = 1; // 1 = BigDown(WaitMid)
-                } 
-                // If current price is high, it's a big move UP
-                else if(ask >= bb_base_m1[0]) {
-                    bm_state = -1; // -1 = BigUp(WaitMid)
-                }
-            }
-        }
-        
-        // 2. State Progression
-        if(bm_state == 1) { // Waiting for price to normalize above mid-band
-            if(bid > bb_base_m1[0]) {
-                bm_state = 2; // Armed for BUY
-                bm_trades_taken = 0;
-            }
-        } 
-        else if(bm_state == -1) { // Waiting for price to normalize below mid-band
-            if(ask < bb_base_m1[0]) {
-                bm_state = -2; // Armed for SELL
-                bm_trades_taken = 0;
-            }
-        }
-        
-        // 3. Evaluate Bypass Conditions
-        if(bm_state == 2) {
-            if(bm_trades_taken < BigMove_Max_Trades) {
-                // Check if price is 'near' the band
-                if(bid <= (buy_extreme + near_dist)) {
-                    d_extreme_buy = true; // EXTREME BYPASS
-                    d_bm_armed_buy = true;
-                }
-            } else {
-                bm_state = 0; // Max trades reached, reset
-            }
-            // Disarm if hits opposite band extreme
-            if(ask >= sell_extreme) bm_state = 0;
-        }
-        else if(bm_state == -2) {
-            if(bm_trades_taken < BigMove_Max_Trades) {
-                // Check if price is 'near' the upper band
-                if(ask >= (sell_extreme - near_dist)) {
-                    d_extreme_sell = true; // EXTREME BYPASS
-                    d_bm_armed_sell = true;
-                }
-            } else {
-                bm_state = 0; // Max trades reached, reset
-            }
-            // Disarm if hits opposite lower band extreme
-            if(bid <= buy_extreme) bm_state = 0;
-        }
-    }
+
 
     // --- 7. Liquidity Sweep ---
     bool disable_deep_buy = (DeepSweep_M1_Bypass_Disable && m1_mom_bypass_active_buy);
@@ -1659,29 +1581,16 @@ void DrawDashboard() {
     string ext_txt = "WAITING"; color ext_col = c_wait;
     if(d_extreme_buy) { 
         ext_txt = "BUY PIERCED"; ext_col = c_buy; 
-        if(d_bm_armed_buy) ext_txt = "BUY NEAR (Big Move Bypass)";
-        else if(m1_mom_bypass_active_buy) ext_txt = "BUY NEAR (Mom Bypass)";
+        if(m1_mom_bypass_active_buy) ext_txt = "BUY NEAR (Mom Bypass)";
     }
     else if(d_extreme_sell) { 
         ext_txt = "SELL PIERCED"; ext_col = c_sell; 
-        if(d_bm_armed_sell) ext_txt = "SELL NEAR (Big Move Bypass)";
-        else if(m1_mom_bypass_active_sell) ext_txt = "SELL NEAR (Mom Bypass)";
+        if(m1_mom_bypass_active_sell) ext_txt = "SELL NEAR (Mom Bypass)";
     }
     if(Use_Squeeze_Filter && is_squeeze) ext_txt += " (Squeeze Offset)";
     string tf_str = StringSubstr(EnumToString(_Period), 7);
     DrawLabel("dash_chk_ext", "[7] " + tf_str + " Extreme: " + ext_txt, x, y+=gap, ext_col);
     
-    // Show Big Move state on Dashboard
-    if(Use_BigMove_Bypass && bm_state != 0) {
-        string bm_txt = ""; color bm_col = clrPurple;
-        if(bm_state == 1) bm_txt = "Big Move UP (Wait Mid Band Normalization)";
-        else if(bm_state == -1) bm_txt = "Big Move DN (Wait Mid Band Normalization)";
-        else if(bm_state == 2) bm_txt = StringFormat("Armed for BUY (%d/%d Trades)", bm_trades_taken, BigMove_Max_Trades);
-        else if(bm_state == -2) bm_txt = StringFormat("Armed for SELL (%d/%d Trades)", bm_trades_taken, BigMove_Max_Trades);
-        DrawLabel("dash_chk_bm", "[BM] " + bm_txt, x, y+=gap, bm_col);
-    } else {
-        DrawLabel("dash_chk_bm", "", x, y+=gap, clrNONE);
-    }
 
     double rt_pips = (iClose(_Symbol, _Period, 0) - iOpen(_Symbol, _Period, 0)) / _Point; 
     long rt_sec = TimeCurrent() - iTime(_Symbol, _Period, 0);
@@ -2313,8 +2222,6 @@ void ExecuteBuy(double ask, double bid, datetime bar_time, double live_speed, do
         PrintFormat("BUY ENTRY! Price: %.5f | SL: %.5f | Speed: %.2f | ATR: %.5f", ask, sl, peak_buy_speed, atr_val);
         last_trade_bar = bar_time;
         InitDynamicTP(ask, true);
-        // Log executions for Big Move Bypass
-        if (d_bm_armed_buy) bm_trades_taken++;
     }
 }
 void ExecuteSell(double bid, double ask, datetime bar_time, double live_speed, double prev_speed, long time_sec, double sl_mult = -1) {
@@ -2335,8 +2242,6 @@ void ExecuteSell(double bid, double ask, datetime bar_time, double live_speed, d
         PrintFormat("SELL ENTRY! Price: %.5f | SL: %.5f | Speed: %.2f | ATR: %.5f", bid, sl, peak_sell_speed, atr_val);
         last_trade_bar = bar_time;
         InitDynamicTP(bid, false);
-        // Log executions for Big Move Bypass
-        if (d_bm_armed_sell) bm_trades_taken++;
     }
 }
 

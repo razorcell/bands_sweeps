@@ -1470,10 +1470,10 @@ void EvaluateDashboardStates() {
 //+------------------------------------------------------------------+
 //| Calculate Net Profit based on daily shifts (0=today, 1=yesterday)|
 //+------------------------------------------------------------------+
-double GetHistoryProfitByShift(int start_shift, int end_shift) {
+double GetHistoryProfitByShift(int start_shift, int end_shift, ENUM_TIMEFRAMES tf = PERIOD_D1) {
     double profit = 0.0;
-    datetime start_time = iTime(_Symbol, PERIOD_D1, start_shift);
-    datetime end_time = (end_shift <= 0) ? TimeCurrent() : (iTime(_Symbol, PERIOD_D1, end_shift - 1) - 1);
+    datetime start_time = iTime(_Symbol, tf, start_shift);
+    datetime end_time = (end_shift <= 0) ? TimeCurrent() : (iTime(_Symbol, tf, end_shift - 1) - 1);
     
     if(start_time <= 0) return 0.0;
     
@@ -1514,8 +1514,9 @@ void DrawDashboard() {
     y+=gap;
     double prev_net = GetHistoryProfitByShift(1, 1);
     double five_net = GetHistoryProfitByShift(4, 0);
-    string hist_str = StringFormat("[ Prev D1: %.2f | Last 5 Days: %.2f ]", prev_net, five_net);
-    color hist_col = (five_net > 0) ? clrGreen : ((five_net < 0) ? clrRed : clrGray);
+    double mtd_net  = GetHistoryProfitByShift(0, 0, PERIOD_MN1);
+    string hist_str = StringFormat("[ Prev D1: %.2f | Last 5 Days: %.2f | MTD: %.2f ]", prev_net, five_net, mtd_net);
+    color hist_col = (mtd_net > 0) ? clrGreen : ((mtd_net < 0) ? clrRed : clrGray);
     DrawLabel("dash_hist_net", hist_str, x, y, hist_col);
     
     // ==========================================

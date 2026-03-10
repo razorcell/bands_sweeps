@@ -570,21 +570,25 @@
             </div>
         </div>
 
-        <div id="bucket-details-container" style="display: none; margin-top: 1.5rem; background: var(--panel-bg); border: 1px solid var(--border-color); border-radius: 12px; padding: 1.5rem; backdrop-filter: var(--glass-blur);">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-                <div style="display: flex; align-items: center; gap: 1.5rem;">
-                    <h3 style="margin: 0;" id="bucket-details-title">Trades</h3>
-                    <div id="bucket-details-summary" style="display: flex; gap: 1rem; font-size: 0.95rem;"></div>
+        <div id="bucket-details-overlay" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(15, 23, 42, 0.8); z-index: 1000; backdrop-filter: blur(8px); align-items: center; justify-content: center; padding: 2rem;" onclick="if(event.target === this) hideBucketDetails()">
+            <div id="bucket-details-container" style="background: var(--panel-bg); border: 1px solid var(--border-color); border-radius: 12px; padding: 1.5rem; width: 100%; max-width: 1200px; max-height: 85vh; display: flex; flex-direction: column; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-shrink: 0;">
+                    <div style="display: flex; align-items: center; gap: 1.5rem;">
+                        <h3 style="margin: 0;" id="bucket-details-title">Trades</h3>
+                        <div id="bucket-details-summary" style="display: flex; gap: 1rem; font-size: 0.95rem;"></div>
+                    </div>
+                    <button class="btn" style="padding: 0.5rem 1rem; font-size: 0.875rem;" onclick="hideBucketDetails()">Close</button>
                 </div>
-                <button class="btn" style="padding: 0.5rem 1rem; font-size: 0.875rem;" onclick="hideBucketDetails()">Close</button>
-            </div>
-            <div style="overflow-x: auto; max-height: 400px; overflow-y: auto;">
+                <div style="overflow-x: auto; flex-grow: 1; overflow-y: auto;">
                 <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 0.9rem;">
                     <thead style="position: sticky; top: 0; background: var(--panel-bg); z-index: 1;">
                         <tr>
                             <th style="padding: 0.75rem; border-bottom: 1px solid var(--border-color); color: var(--text-muted); cursor: pointer; user-select: none;" onclick="handleSort('entry_time')">Entry Time <span id="sort-entry_time">▲</span></th>
                             <th style="padding: 0.75rem; border-bottom: 1px solid var(--border-color); color: var(--text-muted); cursor: pointer; user-select: none;" onclick="handleSort('exit_time')">Exit Time <span id="sort-exit_time"></span></th>
                             <th style="padding: 0.75rem; border-bottom: 1px solid var(--border-color); color: var(--text-muted); cursor: pointer; user-select: none;" onclick="handleSort('trade_type')">Type <span id="sort-trade_type"></span></th>
+                            <th style="padding: 0.75rem; border-bottom: 1px solid var(--border-color); color: var(--text-muted); cursor: pointer; user-select: none;" onclick="handleSort('volume')">Lot <span id="sort-volume"></span></th>
+                            <th style="padding: 0.75rem; border-bottom: 1px solid var(--border-color); color: var(--text-muted); cursor: pointer; user-select: none;" onclick="handleSort('entry_price')">Entry <span id="sort-entry_price"></span></th>
+                            <th style="padding: 0.75rem; border-bottom: 1px solid var(--border-color); color: var(--text-muted); cursor: pointer; user-select: none;" onclick="handleSort('exit_price')">Close <span id="sort-exit_price"></span></th>
                             <th style="padding: 0.75rem; border-bottom: 1px solid var(--border-color); color: var(--text-muted); cursor: pointer; user-select: none;" onclick="handleSort('speed')">Speed <span id="sort-speed"></span></th>
                             <th style="padding: 0.75rem; border-bottom: 1px solid var(--border-color); color: var(--text-muted); cursor: pointer; user-select: none;" onclick="handleSort('profit')">Profit <span id="sort-profit"></span></th>
                             <th style="padding: 0.75rem; border-bottom: 1px solid var(--border-color); color: var(--text-muted);">Comment</th>
@@ -595,6 +599,7 @@
                 </table>
             </div>
         </div>
+    </div>
 
     </div>
 
@@ -803,6 +808,8 @@
                         let commentIdx = -1;
                         let timeIdx = -1;
                         let typeIdx = -1;
+                        let volIdx = -1;
+                        let priceIdx = -1;
 
                         // Scan all rows to find the actual table headers (in MT5 this could be row 700+)
                         for (let r = 0; r < rows.length; r++) {
@@ -816,6 +823,8 @@
                                 if (text === 'direction') dirIdx = idx;
                                 if (text === 'time') timeIdx = idx;
                                 if (text === 'type') typeIdx = idx;
+                                if (text === 'volume' || text === 'size') volIdx = idx;
+                                if (text === 'price') priceIdx = idx;
                             });
                             
                             // We need profit and comment. Break if we found profit in THIS row.
@@ -832,6 +841,8 @@
                             let pendingComment = null;
                             let pendingEntryTime = null;
                             let pendingTradeType = null;
+                            let pendingVolume = null;
+                            let pendingEntryPrice = null;
                             
                             for (let r = headerIdx + 1; r < rows.length; r++) {
                                 const cells = rows[r].querySelectorAll('td');
@@ -841,6 +852,8 @@
                                     const direction = dirIdx !== -1 && cells.length > dirIdx ? cells[dirIdx].textContent.trim().toLowerCase() : "";
                                     const tradeTime = timeIdx !== -1 && cells.length > timeIdx ? cells[timeIdx].textContent.trim() : "";
                                     const tradeType = typeIdx !== -1 && cells.length > typeIdx ? cells[typeIdx].textContent.trim().toLowerCase() : "";
+                                    const volText = volIdx !== -1 && cells.length > volIdx ? cells[volIdx].textContent.trim() : "";
+                                    const priceText = priceIdx !== -1 && cells.length > priceIdx ? cells[priceIdx].textContent.trim() : "";
                                     
                                     if (direction === 'in') {
                                         const speed4dMatch = commentText.match(/(?:B|S)\|(-?\d+(?:\.\d+)?)\|(-?\d+(?:\.\d+)?)\|(\d+)/i);
@@ -855,11 +868,15 @@
                                             pendingComment = commentText;
                                             pendingEntryTime = tradeTime;
                                             pendingTradeType = tradeType;
+                                            pendingVolume = volText;
+                                            pendingEntryPrice = priceText;
                                         } else if (speedMatch) {
                                             pendingSpeed = parseFloat(speedMatch[1]);
                                             pendingComment = commentText;
                                             pendingEntryTime = tradeTime;
                                             pendingTradeType = tradeType;
+                                            pendingVolume = volText;
+                                            pendingEntryPrice = priceText;
                                         }
                                     } else if (direction === 'out' && pendingSpeed !== null) {
                                         const cleanProfit = profitText.replace(/[^\d.-]/g, '');
@@ -871,7 +888,10 @@
                                                 comment: pendingComment,
                                                 entry_time: pendingEntryTime,
                                                 exit_time: tradeTime,
-                                                trade_type: pendingTradeType
+                                                trade_type: pendingTradeType,
+                                                volume: pendingVolume || volText,
+                                                entry_price: pendingEntryPrice,
+                                                exit_price: priceText
                                             };
                                             if (pendingPrevSpeed !== null) {
                                                 tradeObj.prev_speed = pendingPrevSpeed;
@@ -883,6 +903,8 @@
                                         pendingPrevSpeed = null;
                                         pendingTimeSec = null;
                                         pendingComment = null;
+                                        pendingVolume = null;
+                                        pendingEntryPrice = null;
                                     } else if (direction === "") {
                                         const speed4dMatch = commentText.match(/(?:B|S)\|(-?\d+(?:\.\d+)?)\|(-?\d+(?:\.\d+)?)\|(\d+)/i);
                                         const speedMatch = commentText.match(/\|\s*(-?\d+(?:\.\d+)?)\s*pts\/s/i) || 
@@ -900,7 +922,10 @@
                                                     comment: commentText,
                                                     entry_time: tradeTime,
                                                     exit_time: tradeTime,
-                                                    trade_type: tradeType
+                                                    trade_type: tradeType,
+                                                    volume: volText,
+                                                    entry_price: priceText,
+                                                    exit_price: priceText
                                                 });
                                             } else if (speedMatch) {
                                                 trades.push({ 
@@ -909,7 +934,10 @@
                                                     comment: commentText,
                                                     entry_time: tradeTime,
                                                     exit_time: tradeTime,
-                                                    trade_type: tradeType
+                                                    trade_type: tradeType,
+                                                    volume: volText,
+                                                    entry_price: priceText,
+                                                    exit_price: priceText
                                                 });
                                             }
                                         }
@@ -1556,12 +1584,13 @@
                     if (dateObj.getDay() !== 0 && dateObj.getDay() !== 6) {
                         const dateStr = `${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
                         if (!dailyData[dateStr]) {
-                            dailyData[dateStr] = { profit: 0, trades: 0, wins: 0, losses: 0 };
+                            dailyData[dateStr] = { profit: 0, trades: 0, wins: 0, losses: 0, tradeList: [] };
                         }
                         dailyData[dateStr].profit += t.profit;
                         dailyData[dateStr].trades += 1;
                         if (t.profit > 0) dailyData[dateStr].wins += 1;
                         if (t.profit <= 0) dailyData[dateStr].losses += 1;
+                        dailyData[dateStr].tradeList.push(t);
                     }
                 }
             });
@@ -1714,6 +1743,8 @@
                     `;
                 }
 
+                let runningMonthNet = 0;
+
                 // Render each week
                 weeks.forEach((wk, wIndex) => {
                     // For the first week of a month, we display the month name, otherwise empty space
@@ -1730,6 +1761,7 @@
                         if (cell) {
                             const data = cell.data;
                             if (data !== undefined) {
+                                runningMonthNet += data.profit;
                                 const isProfit = data.profit > 0;
                                 const isLoss = data.profit < 0;
                                 const cls = isProfit ? 'profit' : (isLoss ? 'loss' : 'neutral');
@@ -1746,13 +1778,19 @@
                                     }
                                 }
                                 
+                                const mtdSign = runningMonthNet >= 0 ? '+$' : '-$';
+                                const mtdColor = runningMonthNet > 0 ? 'var(--success)' : (runningMonthNet < 0 ? 'var(--danger)' : 'var(--text-muted)');
+
                                 html += `
-                                    <div class="calendar-day ${cls}" style="${cellStyle}">
+                                    <div class="calendar-day ${cls}" style="${cellStyle}; cursor: pointer;" onclick="handleCalendarClick('${cell.dateStr}')" title="Click to view trades">
                                         <div class="calendar-date">${cell.dayObj} <span class="calendar-doy" title="Day of the year">#${cell.dayOfYear}</span></div>
                                         <div class="calendar-value">${sign}${val}</div>
                                         <div style="font-size: 0.65rem; padding-top: 0.25rem; font-weight: 500; opacity: 0.9;">
                                             <span style="color: rgba(255,255,255,0.8);">${data.trades} T:</span> 
                                             <span style="color:var(--success);">${data.wins}</span><span style="opacity: 0.5;">/</span><span style="color:var(--danger);">${data.losses}</span>
+                                        </div>
+                                        <div style="font-size: 0.65rem; padding-top: 0.15rem; font-weight: 600; color: ${mtdColor}; opacity: 0.9;">
+                                            MTD: ${mtdSign}${Math.abs(runningMonthNet).toFixed(2)}
                                         </div>
                                         ${recoveryHtml}
                                     </div>
@@ -1784,6 +1822,14 @@
             
             // Apply current zoom factor consistently
             applyCalendarZoom(mainDiv);
+            window.calendarDailyTrades = dailyData;
+        }
+
+        function handleCalendarClick(dateStr) {
+            const dayData = window.calendarDailyTrades && window.calendarDailyTrades[dateStr];
+            if (dayData && dayData.tradeList && dayData.tradeList.length > 0) {
+                showBucketDetails(dateStr, dayData.tradeList, 'Calendar Day');
+            }
         }
 
         function applyCalendarZoom(div) {
@@ -1885,7 +1931,7 @@
         let currentSortAsc = true;
 
         function showBucketDetails(bucketLabel, trades, titlePrefix = 'Speed Group') {
-            document.getElementById('bucket-details-container').style.display = 'block';
+            document.getElementById('bucket-details-overlay').style.display = 'flex';
             document.getElementById('bucket-details-title').textContent = `Trades for ${titlePrefix}: ${bucketLabel}`;
             
             // Save trades globally for sorting
@@ -1896,11 +1942,6 @@
             currentSortAsc = true;
             
             renderBucketTable();
-            
-            // Scroll to the table softly
-            setTimeout(() => {
-                document.getElementById('bucket-details-container').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-            }, 50);
         }
         
         function handleSort(col) {
@@ -1918,7 +1959,7 @@
             tbody.innerHTML = '';
             
             // Update sort indicators
-            const sortCols = ['entry_time', 'exit_time', 'trade_type', 'speed', 'profit'];
+            const sortCols = ['entry_time', 'exit_time', 'trade_type', 'volume', 'entry_price', 'exit_price', 'speed', 'profit'];
             sortCols.forEach(c => {
                 const span = document.getElementById(`sort-${c}`);
                 if (span) {
@@ -1940,7 +1981,7 @@
                 if (valB === undefined || valB === null) valB = '';
 
                 let cmp = 0;
-                if (currentSortCol === 'speed' || currentSortCol === 'profit') {
+                if (currentSortCol === 'speed' || currentSortCol === 'profit' || currentSortCol === 'volume' || currentSortCol === 'entry_price' || currentSortCol === 'exit_price') {
                      // Numeric comparison
                      valA = parseFloat(valA) || 0;
                      valB = parseFloat(valB) || 0;
@@ -1976,6 +2017,9 @@
                     <td style="padding: 0.75rem;">${t.entry_time || '-'}</td>
                     <td style="padding: 0.75rem;">${t.exit_time || '-'}</td>
                     <td style="padding: 0.75rem; text-transform: uppercase; font-size: 0.8rem; letter-spacing: 0.5px;">${t.trade_type || '-'}</td>
+                    <td style="padding: 0.75rem;">${t.volume !== undefined && t.volume !== null ? t.volume : '-'}</td>
+                    <td style="padding: 0.75rem;">${t.entry_price || '-'}</td>
+                    <td style="padding: 0.75rem;">${t.exit_price || '-'}</td>
                     <td style="padding: 0.75rem;">${t.speed !== undefined && t.speed !== null && t.speed !== '' ? Number(t.speed).toFixed(2) : '-'}</td>
                     <td style="padding: 0.75rem; font-weight: 600;" class="${profitClass}">${profitText}</td>
                     <td style="padding: 0.75rem; font-size: 0.85rem; color: var(--text-muted);">${t.comment || '-'}</td>
@@ -1998,7 +2042,7 @@
         }
 
         function hideBucketDetails() {
-            document.getElementById('bucket-details-container').style.display = 'none';
+            document.getElementById('bucket-details-overlay').style.display = 'none';
         }
     </script>
 </body>

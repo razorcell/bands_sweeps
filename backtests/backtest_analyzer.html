@@ -1198,6 +1198,8 @@
                     customdata_3d.push(b);
                 });
 
+                const maxProfitAbs = Math.max(Math.abs(Math.min(...colors_3d, -50)), Math.abs(Math.max(...colors_3d, 50)));
+
                 const traceGroup3d = {
                     x: x_scatter3d,
                     y: y_scatter3d,
@@ -1207,8 +1209,8 @@
                         size: sizes_3d,
                         color: colors_3d,
                         colorscale: [[0, 'rgb(239, 68, 68)'], [0.5, 'rgb(148, 163, 184)'], [1, 'rgb(34, 197, 94)']],
-                        cmin: Math.min(...colors_3d, -50),
-                        cmax: Math.max(...colors_3d, 50),
+                        cmin: -maxProfitAbs,
+                        cmax: maxProfitAbs,
                         colorbar: { title: 'Net Profit ($)', tickfont: {color: '#94a3b8'}, titlefont: {color: '#f8fafc'} },
                         opacity: 0.9,
                         line: { width: 1, color: '#0f172a' }
@@ -1276,9 +1278,8 @@
                     type: 'heatmap',
                     customdata: custom_heat,
                     colorscale: [[0, 'rgb(239, 68, 68)'], [0.5, 'rgb(148, 163, 184)'], [1, 'rgb(34, 197, 94)']],
-                    zmid: 0,
-                    zmin: Math.min(...colors_3d.length ? colors_3d : [0], -50),
-                    zmax: Math.max(...colors_3d.length ? colors_3d : [0], 50),
+                    zmin: -maxProfitAbs,
+                    zmax: maxProfitAbs,
                     colorbar: { title: 'Net Profit ($)', tickfont: {color: '#94a3b8'}, titlefont: {color: '#f8fafc'} }
                 };
 

@@ -1,0 +1,889 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MT5 Optimization Analyzer</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #0f172a;
+            --panel-bg: rgba(30, 41, 59, 0.7);
+            --border-color: rgba(255, 255, 255, 0.1);
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --accent: #3b82f6;
+            --accent-hover: #2563eb;
+            --success: #10b981;
+            --danger: #ef4444;
+            --glass-blur: blur(12px);
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-color);
+            background-image: radial-gradient(circle at top right, #1e293b, #0f172a);
+            color: var(--text-main);
+            margin: 0;
+            padding: 0;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        header {
+            padding: 2rem;
+            text-align: center;
+            border-bottom: 1px solid var(--border-color);
+            background: rgba(15, 23, 42, 0.5);
+            backdrop-filter: var(--glass-blur);
+        }
+
+        h1 {
+            margin: 0;
+            font-weight: 800;
+            letter-spacing: -0.5px;
+            background: linear-gradient(90deg, #60a5fa, #a78bfa);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .container {
+            flex: 1;
+            padding: 2rem;
+            max-width: 1600px;
+            margin: 0 auto;
+            width: 100%;
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+            gap: 2rem;
+        }
+
+        .upload-section {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 3rem;
+            background: var(--panel-bg);
+            border: 1px dashed var(--border-color);
+            border-radius: 16px;
+            backdrop-filter: var(--glass-blur);
+            transition: all 0.3s ease;
+        }
+
+        .upload-section:hover {
+            border-color: var(--accent);
+            box-shadow: 0 0 20px rgba(59, 130, 246, 0.1);
+        }
+
+        .file-input-wrapper {
+            position: relative;
+            overflow: hidden;
+            display: inline-block;
+        }
+
+        .btn {
+            background-color: var(--accent);
+            color: white;
+            padding: 0.75rem 2rem;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 1rem;
+            cursor: pointer;
+            border: none;
+            transition: background-color 0.2s, transform 0.1s;
+        }
+
+        .btn:hover {
+            background-color: var(--accent-hover);
+            transform: translateY(-2px);
+        }
+
+        .file-input-wrapper input[type=file] {
+            font-size: 100px;
+            position: absolute;
+            left: 0;
+            top: 0;
+            opacity: 0;
+            cursor: pointer;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1.5rem;
+        }
+
+        .stat-card {
+            background: var(--panel-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 1.5rem;
+            backdrop-filter: var(--glass-blur);
+        }
+
+        .stat-title {
+            font-size: 0.875rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 0.5rem;
+        }
+
+        .stat-value {
+            font-size: 1.75rem;
+            font-weight: 800;
+            word-break: break-all;
+        }
+
+        .charts-container {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 1.5rem;
+        }
+
+        .charts-grid-2 {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1.5rem;
+        }
+
+        .chart-box {
+            background: var(--panel-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 1.5rem;
+            backdrop-filter: var(--glass-blur);
+            min-height: 400px;
+        }
+
+        canvas {
+            width: 100% !important;
+            height: 100% !important;
+        }
+
+        .tabs {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 1rem;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 1rem;
+        }
+
+        .tab-btn {
+            background: transparent;
+            color: var(--text-muted);
+            border: 1px solid transparent;
+            padding: 0.75rem 1.5rem;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .tab-btn:hover {
+            color: var(--text-main);
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .tab-btn.active {
+            color: var(--accent);
+            border-color: var(--accent);
+            background: rgba(59, 130, 246, 0.1);
+        }
+
+        .tab-content {
+            display: none;
+            flex-direction: column;
+            gap: 2rem;
+        }
+
+        .tab-content.active {
+            display: flex;
+        }
+
+        .positive { color: var(--success); }
+        .negative { color: var(--danger); }
+
+        .control-panel {
+            background: var(--panel-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 1.5rem;
+            backdrop-filter: var(--glass-blur);
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        select {
+            background: #1e293b;
+            color: var(--text-main);
+            border: 1px solid var(--border-color);
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            font-family: inherit;
+            outline: none;
+        }
+
+        .data-table-container {
+            overflow-x: auto;
+            max-height: 500px;
+            overflow-y: auto;
+            background: var(--panel-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            backdrop-filter: var(--glass-blur);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            text-align: left;
+            font-size: 0.9rem;
+        }
+
+        th {
+            position: sticky;
+            top: 0;
+            background: #1e293b;
+            padding: 0.75rem;
+            border-bottom: 1px solid var(--border-color);
+            color: var(--text-muted);
+            cursor: pointer;
+            user-select: none;
+            z-index: 10;
+        }
+
+        td {
+            padding: 0.75rem;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+        }
+
+        tr:hover {
+            background: rgba(255,255,255,0.02);
+        }
+        .info-alert {
+            background: rgba(59, 130, 246, 0.1);
+            border-left: 4px solid var(--accent);
+            padding: 1rem;
+            border-radius: 0 8px 8px 0;
+            margin-bottom: 1.5rem;
+            font-size: 0.9rem;
+            line-height: 1.5;
+        }
+
+        .info-alert h4 {
+            margin: 0 0 0.5rem 0;
+            color: var(--accent);
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .info-alert p {
+            margin: 0;
+            color: var(--text-muted);
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <h1>MT5 Optimization Analyzer</h1>
+        <p style="color: var(--text-muted); margin-top: 0.5rem;">Discover profitable input clusters and relationships</p>
+    </header>
+
+    <div class="container">
+        
+        <div class="upload-section" id="upload-section">
+            <div class="file-input-wrapper">
+                <button class="btn">Select MT5 Optimization XML</button>
+                <input type="file" id="fileInput" accept=".xml">
+            </div>
+            <div style="margin-left: 20px; color: var(--text-muted);" id="upload-status">Awaiting optimization xml file...</div>
+        </div>
+
+        <div class="tabs" id="tabs-container" style="display: none;">
+            <button class="tab-btn active" onclick="switchTab('overview-tab')">Overview & Clustering</button>
+            <button class="tab-btn" onclick="switchTab('exploration-tab')">Variable Exploration</button>
+            <button class="tab-btn" onclick="switchTab('data-tab')">Raw Data</button>
+        </div>
+
+        <div id="overview-tab" class="tab-content">
+            <div class="stats-grid" id="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-title">Total Passes Generated</div>
+                    <div class="stat-value" id="totalPasses">-</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-title">Inputs Optimized</div>
+                    <div class="stat-value" id="totalInputs">-</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-title">Highest Profit</div>
+                    <div class="stat-value positive" id="bestProfit">-</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-title">Lowest Profit / Max Loss</div>
+                    <div class="stat-value negative" id="worstProfit">-</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-title">Winning Passes %</div>
+                    <div class="stat-value" id="winRate">-</div>
+                </div>
+            </div>
+
+            <div class="charts-container">
+                <div class="chart-box">
+                    <h3 style="margin-top:0;">Input Cluster Pathways (Parallel Coordinates)</h3>
+                    <div class="info-alert">
+                        <h4>💡 How to use Parallel Coordinates</h4>
+                        <p>This chart maps every single optimization pass as a single line flowing from left to right across all your inputs and ending at the outputs (like Profit).<br>
+                        <strong>To find the best clusters:</strong> Click and drag vertically on any axis (like Profit) to select only the top performing passes. The chart will instantly fade out bad passes, revealing the exact path (combination of inputs) that leads to those high profits. You can drag on multiple axes to filter even further.</p>
+                    </div>
+                    <div id="parallel-coords" style="width: 100%; height: 600px;"></div>
+                </div>
+            </div>
+            
+            <div class="charts-container">
+                <div class="chart-box">
+                    <h3 style="margin-top:0;">Feature Importance (Correlation to Profit)</h3>
+                    <div class="info-alert">
+                        <h4>💡 What is Pearson Correlation?</h4>
+                        <p>Pearson Correlation measures the linear relationship between two variables, scoring from -1.0 to 1.0.<br>
+                        • <strong>+1.0 (Green):</strong> Perfect positive relationship. As the input increases, Profit increases.<br>
+                        • <strong>-1.0 (Red):</strong> Perfect negative relationship. As the input increases, Profit decreases.<br>
+                        • <strong>Near 0:</strong> No linear relationship. The input might be irrelevant, or its relationship is non-linear (e.g., the best value is in the middle).</p>
+                    </div>
+                    <div style="position: relative; height: 350px;">
+                        <canvas id="importanceChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="exploration-tab" class="tab-content">
+            <div class="control-panel">
+                <label style="color: var(--text-muted); font-weight: 600;">X Axis:</label>
+                <select id="xAxisSelect"></select>
+                
+                <label style="color: var(--text-muted); font-weight: 600; margin-left: 1rem;">Y Axis:</label>
+                <select id="yAxisSelect"></select>
+
+                <label style="color: var(--text-muted); font-weight: 600; margin-left: 1rem;">Color By:</label>
+                <select id="colorSelect">
+                    <option value="Profit">Profit</option>
+                    <option value="Drawdown %">Drawdown %</option>
+                    <option value="Total trades">Total Trades</option>
+                    <option value="Expected payoff">Expected Payoff</option>
+                    <option value="Recovery factor">Recovery Factor</option>
+                    <option value="Sharpe ratio">Sharpe Ratio</option>
+                </select>
+            </div>
+
+            <div class="charts-container">
+                <div class="chart-box">
+                    <h3 style="margin-top:0;">2D Variable Analysis</h3>
+                    <div class="info-alert">
+                        <h4>💡 How to explore variables</h4>
+                        <p>Choose any two inputs for the X and Y axes to see how they interact. The color of the dots represents the outcome (e.g., Profit). Look for clusters of bright green dots to find the "sweet spot" ranges for those two variables combined.</p>
+                    </div>
+                    <div id="scatter2d" style="width: 100%; height: 600px;"></div>
+                </div>
+            </div>
+        </div>
+
+        <div id="data-tab" class="tab-content">
+            <div class="data-table-container">
+                <table id="dataTable">
+                    <thead id="dataTableHead">
+                        <!-- Dynamic Headers go here -->
+                    </thead>
+                    <tbody id="dataTableBody">
+                        <!-- Dynamic Rows go here -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let globalData = [];
+        let inputVariables = [];
+        let standardOutputs = ['Pass', 'Result', 'Profit', 'Expected payoff', 'Profit factor', 'Recovery factor', 'Sharpe ratio', 'Custom', 'Drawdown %', 'Total trades'];
+        let actualOutputsFound = [];
+        
+        let scatter2dTraces = null;
+        let importanceChartInstance = null;
+
+        document.getElementById('fileInput').addEventListener('change', handleFile);
+
+        // Tab Switching function
+        function switchTab(tabId) {
+            document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(content => {
+                content.classList.remove('active');
+                content.style.display = 'none';
+            });
+            
+            event.target.classList.add('active');
+            const targetTab = document.getElementById(tabId);
+            targetTab.style.display = 'flex';
+            setTimeout(() => targetTab.classList.add('active'), 10);
+            
+            if (tabId === 'exploration-tab' && globalData.length > 0) {
+                updateScatterChart();
+            }
+        }
+
+        async function handleFile(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            document.getElementById('upload-status').textContent = 'Parsing XML...';
+            
+            try {
+                const text = await file.text();
+                parseXML(text);
+                document.getElementById('upload-status').innerHTML = `<span style="color:var(--success);">Loaded ${globalData.length} passes successfully.</span>`;
+                document.getElementById('tabs-container').style.display = 'flex';
+                
+                // Switch to overview implicitly
+                document.querySelector('.tab-btn.active').click();
+                
+                setupUI();
+                updateDashboard();
+            } catch (err) {
+                console.error("Error parsing file", err);
+                document.getElementById('upload-status').innerHTML = `<span style="color:var(--danger);">Error parsing file: ${err.message}</span>`;
+            }
+        }
+
+        function parseXML(xmlString) {
+            const parser = new DOMParser();
+            const xmlDoc = parser.parseFromString(xmlString, "text/xml");
+            
+            // Check for parsing errors
+            if (xmlDoc.getElementsByTagName("parsererror").length > 0) {
+                throw new Error("Invalid XML Format");
+            }
+
+            const rows = xmlDoc.getElementsByTagName("Row");
+            if (rows.length < 2) {
+                throw new Error("No data rows found in XML");
+            }
+
+            // Extract Headers
+            const headerRow = rows[0];
+            const headerCells = headerRow.getElementsByTagName("Cell");
+            const headers = [];
+            
+            for (let i = 0; i < headerCells.length; i++) {
+                const dataNode = headerCells[i].getElementsByTagName("Data")[0];
+                let headerName = dataNode ? dataNode.textContent.trim() : `Column${i}`;
+                
+                // Some standardizations for exact matching
+                if (headerName === "Expected Payoff") headerName = "Expected payoff";
+                if (headerName === "Profit Factor") headerName = "Profit factor";
+                if (headerName === "Recovery Factor") headerName = "Recovery factor";
+                if (headerName === "Sharpe Ratio") headerName = "Sharpe ratio";
+                if (headerName === "Equity DD %") headerName = "Drawdown %";
+                if (headerName === "Trades") headerName = "Total trades";
+
+                headers.push(headerName);
+            }
+
+            // Find Inputs
+            inputVariables = [];
+            actualOutputsFound = [];
+            headers.forEach(h => {
+                if (standardOutputs.includes(h)) {
+                    actualOutputsFound.push(h);
+                } else {
+                    inputVariables.push(h);
+                }
+            });
+
+            // Parse Data
+            globalData = [];
+            for (let r = 1; r < rows.length; r++) {
+                const cells = rows[r].getElementsByTagName("Cell");
+                if (cells.length === 0) continue;
+
+                let rowData = {};
+                for (let c = 0; c < headers.length; c++) {
+                    if (c < cells.length) {
+                        const dataNode = cells[c].getElementsByTagName("Data")[0];
+                        if (dataNode) {
+                            const val = dataNode.textContent.trim();
+                            // Parse as float if possible, else keep string
+                            rowData[headers[c]] = isNaN(parseFloat(val)) ? val : parseFloat(val);
+                        } else {
+                            rowData[headers[c]] = null;
+                        }
+                    } else {
+                        rowData[headers[c]] = null;
+                    }
+                }
+                
+                // Add some derived features useful for UI highlighting
+                rowData._isProfitable = rowData['Profit'] > 0;
+                
+                globalData.push(rowData);
+            }
+            
+            // Generate Table Headers
+            const tHead = document.getElementById('dataTableHead');
+            tHead.innerHTML = '';
+            const tr = document.createElement('tr');
+            headers.forEach(h => {
+                const th = document.createElement('th');
+                th.textContent = h;
+                // Add simple sorting to all columns
+                th.onclick = () => sortTable(h);
+                tr.appendChild(th);
+            });
+            tHead.appendChild(tr);
+            
+            populateTable(globalData);
+        }
+
+        // Setup drop downs
+        function setupUI() {
+            const xSelect = document.getElementById('xAxisSelect');
+            const ySelect = document.getElementById('yAxisSelect');
+            
+            xSelect.innerHTML = '';
+            ySelect.innerHTML = '';
+            
+            inputVariables.forEach(inp => {
+                xSelect.innerHTML += `<option value="${inp}">${inp}</option>`;
+                ySelect.innerHTML += `<option value="${inp}">${inp}</option>`;
+            });
+            
+            if (inputVariables.length > 1) {
+                ySelect.selectedIndex = 1;
+            }
+
+            // Re-render chart on change
+            xSelect.onchange = updateScatterChart;
+            ySelect.onchange = updateScatterChart;
+            document.getElementById('colorSelect').onchange = updateScatterChart;
+        }
+
+        function updateDashboard() {
+            if (!globalData || globalData.length === 0) return;
+            
+            // Basic Stats
+            const totalPasses = globalData.length;
+            document.getElementById('totalPasses').textContent = totalPasses;
+            document.getElementById('totalInputs').textContent = inputVariables.length;
+            
+            let maxProfit = -Infinity;
+            let minProfit = Infinity;
+            let winningPasses = 0;
+            
+            globalData.forEach(p => {
+                if (p.Profit > maxProfit) maxProfit = p.Profit;
+                if (p.Profit < minProfit) minProfit = p.Profit;
+                if (p.Profit > 0) winningPasses++;
+            });
+            
+            document.getElementById('bestProfit').innerHTML = `$${maxProfit.toFixed(2)}`;
+            document.getElementById('worstProfit').innerHTML = `$${minProfit.toFixed(2)}`;
+            document.getElementById('winRate').textContent = `${((winningPasses / totalPasses) * 100).toFixed(1)}%`;
+
+            drawParallelCoordinates();
+            drawImportanceChart();
+        }
+
+        function drawParallelCoordinates() {
+            // Plotly Parallel Coordinates
+            let dimensions = [];
+            
+            // Add inputs first
+            inputVariables.forEach(inp => {
+                let values = globalData.map(d => d[inp]);
+                dimensions.push({
+                    label: inp,
+                    values: values
+                });
+            });
+            
+            // Add critical outputs
+            let keyOutputs = ['Drawdown %', 'Total trades', 'Profit'];
+            keyOutputs.forEach(out => {
+                if (actualOutputsFound.includes(out) || globalData[0][out] !== undefined) {
+                    let values = globalData.map(d => d[out]);
+                    dimensions.push({
+                        label: out,
+                        values: values
+                    });
+                }
+            });
+
+            // Map profit to color scale
+            let profits = globalData.map(d => d['Profit']);
+            let maxP = Math.max(...profits);
+            let minP = Math.min(...profits);
+
+            var trace = {
+                type: 'parcoords',
+                line: {
+                    color: profits,
+                    colorscale: [
+                        [0, '#ef4444'],   // Red for lowest
+                        [0.5, '#94a3b8'], // Neutral
+                        [1, '#10b981']    // Green for highest
+                    ],
+                    cmin: minP,
+                    cmax: maxP,
+                    showscale: true
+                },
+                dimensions: dimensions,
+                unselected: { line: { opacity: 0.1 } } // Dim unselected heavily to make paths stand out
+            };
+
+            var layout = {
+                paper_bgcolor: 'rgba(0,0,0,0)',
+                plot_bgcolor: 'rgba(0,0,0,0)',
+                font: { color: '#f8fafc', family: 'Inter' },
+                margin: { l: 50, r: 50, t: 50, b: 50 }
+            };
+
+            Plotly.newPlot('parallel-coords', [trace], layout, {responsive: true});
+        }
+
+        function drawImportanceChart() {
+            // Calculate simple feature importance using absolute Pearson correlation with Profit
+            const profits = globalData.map(d => d.Profit);
+            
+            let correlations = [];
+            
+            inputVariables.forEach(inp => {
+                const values = globalData.map(d => d[inp]);
+                const cor = calculatePearsonCorrelation(values, profits);
+                correlations.push({
+                    input: inp,
+                    correlation: cor,
+                    absCor: Math.abs(cor)
+                });
+            });
+            
+            // Sort by absolute correlation
+            correlations.sort((a,b) => b.absCor - a.absCor);
+            
+            const labels = correlations.map(c => c.input);
+            const data = correlations.map(c => c.correlation);
+            const bgColors = data.map(v => v > 0 ? 'rgba(16, 185, 129, 0.7)' : 'rgba(239, 68, 68, 0.7)');
+            const borderColors = data.map(v => v > 0 ? '#10b981' : '#ef4444');
+
+            const ctx = document.getElementById('importanceChart').getContext('2d');
+            
+            if (importanceChartInstance) {
+                importanceChartInstance.destroy();
+            }
+
+            importanceChartInstance = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Correlation to Profit',
+                        data: data,
+                        backgroundColor: bgColors,
+                        borderColor: borderColors,
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return `Correlation: ${context.raw.toFixed(3)}`;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            grid: { color: 'rgba(255, 255, 255, 0.1)' },
+                            ticks: { color: '#94a3b8' },
+                            title: { display: true, text: 'Pearson Correlation coefficient (r)', color: '#94a3b8' }
+                        },
+                        x: {
+                            grid: { display: false },
+                            ticks: { color: '#94a3b8' }
+                        }
+                    }
+                }
+            });
+        }
+
+        // Plotly 2D Scatter for exploration
+        function updateScatterChart() {
+            if (!globalData || globalData.length === 0) return;
+
+            const xVar = document.getElementById('xAxisSelect').value;
+            const yVar = document.getElementById('yAxisSelect').value;
+            const colorVar = document.getElementById('colorSelect').value;
+
+            const xData = globalData.map(d => d[xVar]);
+            const yData = globalData.map(d => d[yVar]);
+            const colorData = globalData.map(d => d[colorVar]);
+            
+            // Create hover text
+            const hoverText = globalData.map(d => {
+                let txt = `Pass: ${d.Pass}<br>${xVar}: ${d[xVar]}<br>${yVar}: ${d[yVar]}<br>${colorVar}: ${d[colorVar]}`;
+                // add profit if it's not the color var
+                if (colorVar !== 'Profit') {
+                    txt += `<br>Profit: $${d.Profit.toFixed(2)}`;
+                }
+                return txt;
+            });
+
+            const trace = {
+                x: xData,
+                y: yData,
+                mode: 'markers',
+                marker: {
+                    size: 10,
+                    color: colorData,
+                    colorscale: colorVar === 'Profit' ? [
+                        [0, '#ef4444'],   // Red
+                        [0.5, '#94a3b8'], // Neutral
+                        [1, '#10b981']    // Green
+                    ] : 'Viridis',
+                    showscale: true,
+                    line: { width: 1, color: 'rgba(255,255,255,0.2)' }
+                },
+                text: hoverText,
+                hoverinfo: 'text',
+                type: 'scatter'
+            };
+
+            const layout = {
+                paper_bgcolor: 'rgba(0,0,0,0)',
+                plot_bgcolor: 'rgba(0,0,0,0)',
+                font: { color: '#f8fafc', family: 'Inter' },
+                xaxis: { title: xVar, gridcolor: 'rgba(255,255,255,0.1)' },
+                yaxis: { title: yVar, gridcolor: 'rgba(255,255,255,0.1)' },
+                margin: { l: 60, r: 20, t: 30, b: 60 },
+                hovermode: 'closest'
+            };
+
+            Plotly.newPlot('scatter2d', [trace], layout, {responsive: true});
+        }
+
+        let currentSortCol = '';
+        let sortAsc = true;
+        
+        function sortTable(column) {
+            if (currentSortCol === column) {
+                sortAsc = !sortAsc;
+            } else {
+                currentSortCol = column;
+                sortAsc = true;
+            }
+            
+            const sortedData = [...globalData].sort((a, b) => {
+                let valA = a[column];
+                let valB = b[column];
+                
+                if (typeof valA === 'string' && typeof valB === 'string') {
+                    return sortAsc ? valA.localeCompare(valB) : valB.localeCompare(valA);
+                }
+                return sortAsc ? valA - valB : valB - valA;
+            });
+            
+            populateTable(sortedData);
+            
+            // Update Headers UI
+            const ths = document.getElementById('dataTableHead').getElementsByTagName('th');
+            for (let th of ths) {
+                th.textContent = th.textContent.replace(' ▲', '').replace(' ▼', '');
+                if (th.textContent === column) {
+                    th.textContent += sortAsc ? ' ▲' : ' ▼';
+                }
+            }
+        }
+
+        function populateTable(data) {
+            const tbody = document.getElementById('dataTableBody');
+            tbody.innerHTML = '';
+            
+            // Limit to 2000 rows to prevent extreme freezing if large xml
+            const maxRows = Math.min(data.length, 2000);
+            
+            // Get columns in order
+            const ths = document.getElementById('dataTableHead').getElementsByTagName('th');
+            const cols = [];
+            for (let th of ths) {
+                cols.push(th.textContent.replace(' ▲', '').replace(' ▼', ''));
+            }
+
+            for (let i = 0; i < maxRows; i++) {
+                const tr = document.createElement('tr');
+                const rowData = data[i];
+                
+                cols.forEach(col => {
+                    const td = document.createElement('td');
+                    let val = rowData[col];
+                    
+                    if (typeof val === 'number') {
+                        // format appropriately
+                        if (col === 'Profit' || col === 'Result') {
+                            td.textContent = val.toFixed(2);
+                            if (val > 0) td.classList.add('positive');
+                            if (val < 0) td.classList.add('negative');
+                        } else if (Number.isInteger(val)) {
+                            td.textContent = val;
+                        } else {
+                            td.textContent = val.toFixed(4); // default decimals
+                        }
+                    } else {
+                        td.textContent = val;
+                    }
+                    tr.appendChild(td);
+                });
+                tbody.appendChild(tr);
+            }
+        }
+
+        // Helper: Pearson correlation
+        function calculatePearsonCorrelation(x, y) {
+            let n = x.length;
+            let sum_x = 0;
+            let sum_y = 0;
+            let sum_xy = 0;
+            let sum_x2 = 0;
+            let sum_y2 = 0;
+            for (let i = 0; i < n; i++) {
+                sum_x += x[i];
+                sum_y += y[i];
+                sum_xy += (x[i] * y[i]);
+                sum_x2 += (x[i] * x[i]);
+                sum_y2 += (y[i] * y[i]);
+            }
+            let step1 = (n * sum_xy) - (sum_x * sum_y);
+            let step2 = (n * sum_x2) - (sum_x * sum_x);
+            let step3 = (n * sum_y2) - (sum_y * sum_y);
+            let step4 = Math.sqrt(step2 * step3);
+            if (step4 === 0) return 0;
+            return step1 / step4;
+        }
+
+    </script>
+</body>
+</html>

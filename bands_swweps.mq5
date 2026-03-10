@@ -80,6 +80,8 @@ input int                  BBSlope_Lookback = 3;
 input int                  ADX_Period = 14;        
 input double               ADX_Threshold = 25.0;   
 input bool                 ADX_Dir_From_Mean = true; // [TOGGLE] If using ADX, UP trend if price > Mean (ignores DI lines)
+input bool                 ADX_Range_Bypass_H1 = true;       // [TOGGLE] If Ranging by ADX, bypass High Term TF (H1) rules
+input bool                 ADX_Range_Bypass_M5 = false;      // [TOGGLE] If Ranging by ADX, bypass Medium Term TF (M5) rules
 input double               MeanZonePct = 0.10;     
 
 input string               __DynMeanZone__ = "=== 4b. Dynamic Mean Zone ===";
@@ -190,6 +192,14 @@ input bool                 Use_Deep_Sweep = true;  // [TOGGLE] Require deeper sw
 input int                  DeepSweep_MinBars = 30; 
 input double               DeepSweep_ATR = 1.0;    
 input bool                 DeepSweep_M1_Bypass_Disable = true; // [TOGGLE] Disable deep sweep requirement during M1 Big Push Bypass
+input bool                 Show_DeepSweep_Lines  = true; // [TOGGLE] Show Deep Sweep requirement lines
+input bool                 Show_DeepSweep_Labels = true; // [TOGGLE] Show Deep Sweep requirement labels
+
+input string               __NormalSweep__ = "=== 7b. Normal Sweep Logic ===";
+input bool                 Use_Normal_Sweep = true;          // [TOGGLE] Require depth for all non-major sweeps
+input double               NormalSweep_ATR = 0.5;            // ATR Multiplier for normal sweep depth
+input bool                 Show_NormalSweep_Lines  = true;   // [TOGGLE] Show Normal Sweep requirement lines
+input bool                 Show_NormalSweep_Labels = true;   // [TOGGLE] Show Normal Sweep requirement labels
 
 input string               __Clearance__ = "=== 8. Structural Clearance ===";
 input bool                 Use_Clearance_Filter = true; // [TOGGLE] Prevent buying into immediate resistance
@@ -1458,19 +1468,16 @@ void EvaluateDashboardStates() {
 }
 
 //+------------------------------------------------------------------+
-//| Calculate Daily Net Profit                                       |
+//| Calculate Net Profit based on daily shifts (0=today, 1=yesterday)|
 //+------------------------------------------------------------------+
-double GetDailyNetProfit() {
-    double daily_profit = 0.0;
-    datetime current_time = TimeCurrent();
-    MqlDateTime dt;
-    TimeToStruct(current_time, dt);
-    dt.hour = 0;
-    dt.min = 0;
-    dt.sec = 0;
-    datetime start_of_day = StructToTime(dt);
+double GetHistoryProfitByShift(int start_shift, int end_shift) {
+    double profit = 0.0;
+    datetime start_time = iTime(_Symbol, PERIOD_D1, start_shift);
+    datetime end_time = (end_shift <= 0) ? TimeCurrent() : (iTime(_Symbol, PERIOD_D1, end_shift - 1) - 1);
     
-    if(HistorySelect(start_of_day, current_time)) {
+    if(start_time <= 0) return 0.0;
+    
+    if(HistorySelect(start_time, end_time)) {
         int deals = HistoryDealsTotal();
         for(int i = 0; i < deals; i++) {
             ulong ticket = HistoryDealGetTicket(i);
@@ -1479,21 +1486,21 @@ double GetDailyNetProfit() {
                     long entry_type = HistoryDealGetInteger(ticket, DEAL_ENTRY);
                     // Only sum profit/commission/swap on EXITS (out or inout)
                     if(entry_type == DEAL_ENTRY_OUT || entry_type == DEAL_ENTRY_INOUT || entry_type == DEAL_ENTRY_OUT_BY) {
-                        daily_profit += HistoryDealGetDouble(ticket, DEAL_PROFIT);
-                        daily_profit += HistoryDealGetDouble(ticket, DEAL_COMMISSION);
-                        daily_profit += HistoryDealGetDouble(ticket, DEAL_SWAP);
+                        profit += HistoryDealGetDouble(ticket, DEAL_PROFIT);
+                        profit += HistoryDealGetDouble(ticket, DEAL_COMMISSION);
+                        profit += HistoryDealGetDouble(ticket, DEAL_SWAP);
                     }
                 }
             }
         }
     }
-    return daily_profit;
+    return profit;
 }
 
 void DrawDashboard() {
     int x = 20, y = 20, gap = 18; color c_buy = clrGreen, c_sell = clrRed, c_wait = clrDimGray, c_text = clrBlack;
 
-    double daily_net = GetDailyNetProfit();
+    double daily_net = GetHistoryProfitByShift(0, 0);
     string net_str = StringFormat("[ Net D1: %.2f ]", daily_net);
     color net_col = (daily_net > 0) ? clrGreen : ((daily_net < 0) ? clrRed : clrGray);
 
@@ -1504,6 +1511,13 @@ void DrawDashboard() {
     DrawLabel("dash_title", StringFormat("[ Bands Sweeper v2.1 | GMT %s ]", gmt_str), x + 150, y, clrBlue);
     DrawLabel("dash_daily_net", net_str, x, y, net_col);
     
+    y+=gap;
+    double prev_net = GetHistoryProfitByShift(1, 1);
+    double five_net = GetHistoryProfitByShift(4, 0);
+    string hist_str = StringFormat("[ Prev D1: %.2f | Last 5 Days: %.2f ]", prev_net, five_net);
+    color hist_col = (five_net > 0) ? clrGreen : ((five_net < 0) ? clrRed : clrGray);
+    DrawLabel("dash_hist_net", hist_str, x, y, hist_col);
+    
     // ==========================================
     // SECTION 1: LIVE ENTRY CHECKLIST
     // ==========================================
@@ -1511,7 +1525,12 @@ void DrawDashboard() {
 
     if(Use_Ranging_Filter) {
         if(d_is_ranging) {
-            DrawLabel("dash_chk_ranging", StringFormat("[0] Market State: RANGING (M5/H1 Bypassed) | ADX: %.1f", adx_ranging[0]), x, y+=gap, clrDarkGoldenrod);
+            string bypass_str = "";
+            if(ADX_Range_Bypass_H1 && ADX_Range_Bypass_M5) bypass_str = " (M5/H1 Bypassed)";
+            else if(ADX_Range_Bypass_H1) bypass_str = " (H1 Bypassed)";
+            else if(ADX_Range_Bypass_M5) bypass_str = " (M5 Bypassed)";
+            
+            DrawLabel("dash_chk_ranging", StringFormat("[0] Market State: RANGING%s | ADX: %.1f", bypass_str, adx_ranging[0]), x, y+=gap, clrDarkGoldenrod);
         } else {
             string tr_dir = "NEUTRAL";
             if(d_h1_trend == 1) tr_dir = "UP";
@@ -1524,12 +1543,15 @@ void DrawDashboard() {
     if(Use_EOD_Filter) DrawLabel("dash_chk_eod", "[1a] EOD Filter: " + (IsEndOfDayRestricted() ? "PAUSED (Near Daily Close)" : "CLEAR"), x, y+=gap, IsEndOfDayRestricted() ? clrRed : clrGreen);
     
     string htf2_str = StringSubstr(EnumToString(InpHTF2), 7);
-    string d_h1_txt = d_is_ranging ? "BYPASSED (Ranging)" : h1_dash_txt;
-    color  d_h1_col = d_is_ranging ? clrDarkGoldenrod : h1_dash_col;
+    bool is_h1_bypassed = (d_is_ranging && ADX_Range_Bypass_H1);
+    string d_h1_txt = is_h1_bypassed ? "BYPASSED (Ranging)" : h1_dash_txt;
+    color  d_h1_col = is_h1_bypassed ? clrDarkGoldenrod : h1_dash_col;
     DrawLabel("dash_chk_h1", "[2] " + htf2_str + " Zone & Trend: " + d_h1_txt, x, y+=gap, d_h1_col);
     
     string m5_txt = "WAITING"; color m5_col = c_wait;
-    if(d_is_ranging) { m5_txt = "BYPASSED (Ranging)"; m5_col = clrDarkGoldenrod; }
+    bool is_m5_bypassed = (d_is_ranging && ADX_Range_Bypass_M5);
+    
+    if(is_m5_bypassed) { m5_txt = "BYPASSED (Ranging)"; m5_col = clrDarkGoldenrod; }
     else if(d_m5_trend == 1) {
         if(d_m5_buy) { m5_txt = "BUY VALID (Trend Mean & Below)"; m5_col = c_buy; }
         else if(d_m5_sell) { m5_txt = "SELL VALID (Extreme Top)"; m5_col = c_sell; }
@@ -1568,11 +1590,11 @@ void DrawDashboard() {
         swp_col = c_sell; 
     }
     
-    if(Use_Deep_Sweep) {
+    if(Use_Deep_Sweep || Use_Normal_Sweep) {
         if(DeepSweep_M1_Bypass_Disable && (m1_mom_bypass_active_buy || m1_mom_bypass_active_sell)) {
-            swp_txt += " (Deep Req: OFF via Bypass)";
+            swp_txt += " (Req: OFF via Bypass)";
         } else {
-            swp_txt += " (Deep Req: ON)";
+            swp_txt += " (Req: ON)";
         }
     }
     
@@ -2050,8 +2072,8 @@ void CheckEntry() {
     bool is_eod = IsEndOfDayRestricted();
     bool is_hour_blocked = IsTradingHourBlocked();
     
-    bool effective_ranging_h1 = d_is_ranging || (M1_Mom_Bypass_HTF && d_m1_is_ranging);
-    bool effective_ranging_m5 = d_is_ranging || (M1_Mom_Bypass_MTF && d_m1_is_ranging);
+    bool effective_ranging_h1 = (d_is_ranging && ADX_Range_Bypass_H1) || (M1_Mom_Bypass_HTF && d_m1_is_ranging);
+    bool effective_ranging_m5 = (d_is_ranging && ADX_Range_Bypass_M5) || (M1_Mom_Bypass_MTF && d_m1_is_ranging);
 
     bool h1_buy_ok  = effective_ranging_h1 ? true : d_h1_buy;
     bool h1_sell_ok = effective_ranging_h1 ? true : d_h1_sell;
@@ -2248,32 +2270,60 @@ void ExecuteSell(double bid, double ask, datetime bar_time, double live_speed, d
 //+------------------------------------------------------------------+
 //| REAL-TIME Cluster-Aware & Deep Sweep Logic                       |
 //+------------------------------------------------------------------+
-bool CheckLiquiditySweepRealTime(bool isBuy, double current_price, string &out_type, double &out_price, bool disable_deep_sweep = false) {
+bool CheckLiquiditySweepRealTime(bool isBuy, double current_price, string &out_type, double &out_price, bool disable_sweep_req = false) {
     double cluster_dist = atr_m1[0] * ClusterToleranceATR; bool valid_sweep_found = false;
     if(isBuy) {
         for(int i = 0; i < ArraySize(active_supports); i++) {
-            bool apply_deep = active_supports[i].deep_sweep && !disable_deep_sweep;
-            double raw_sup_price = active_supports[i].price; double trigger_price = raw_sup_price; if(apply_deep) trigger_price -= (atr_m1[0] * DeepSweep_ATR);
+            bool apply_deep = active_supports[i].deep_sweep && !disable_sweep_req;
+            bool apply_normal = Use_Normal_Sweep && !apply_deep && !disable_sweep_req;
+            
+            double raw_sup_price = active_supports[i].price; 
+            double trigger_price = raw_sup_price; 
+            if(apply_deep) trigger_price -= (atr_m1[0] * DeepSweep_ATR);
+            else if(apply_normal) trigger_price -= (atr_m1[0] * NormalSweep_ATR);
+            
             if(current_price <= trigger_price) {
                 bool lower_cluster_unswept = false;
                 for(int j = 0; j < ArraySize(active_supports); j++) {
                     double other_sup = active_supports[j].price;
-                    bool apply_deep_other = active_supports[j].deep_sweep && !disable_deep_sweep;
-                    if(other_sup < raw_sup_price && (raw_sup_price - other_sup) <= cluster_dist) { double other_trigger = other_sup; if(apply_deep_other) other_trigger -= (atr_m1[0] * DeepSweep_ATR); if(current_price > other_trigger) { lower_cluster_unswept = true; break; } }
+                    bool apply_deep_other = active_supports[j].deep_sweep && !disable_sweep_req;
+                    bool apply_normal_other = Use_Normal_Sweep && !apply_deep_other && !disable_sweep_req;
+                    
+                    if(other_sup < raw_sup_price && (raw_sup_price - other_sup) <= cluster_dist) { 
+                        double other_trigger = other_sup; 
+                        if(apply_deep_other) other_trigger -= (atr_m1[0] * DeepSweep_ATR);
+                        else if(apply_normal_other) other_trigger -= (atr_m1[0] * NormalSweep_ATR);
+                        
+                        if(current_price > other_trigger) { lower_cluster_unswept = true; break; } 
+                    }
                 }
                 if(!lower_cluster_unswept) { valid_sweep_found = true; out_type = active_supports[i].type; out_price = active_supports[i].price; break; }
             }
         }
     } else {
         for(int i = 0; i < ArraySize(active_resistances); i++) {
-            bool apply_deep = active_resistances[i].deep_sweep && !disable_deep_sweep;
-            double raw_res_price = active_resistances[i].price; double trigger_price = raw_res_price; if(apply_deep) trigger_price += (atr_m1[0] * DeepSweep_ATR);
+            bool apply_deep = active_resistances[i].deep_sweep && !disable_sweep_req;
+            bool apply_normal = Use_Normal_Sweep && !apply_deep && !disable_sweep_req;
+            
+            double raw_res_price = active_resistances[i].price; 
+            double trigger_price = raw_res_price; 
+            if(apply_deep) trigger_price += (atr_m1[0] * DeepSweep_ATR);
+            else if(apply_normal) trigger_price += (atr_m1[0] * NormalSweep_ATR);
+            
             if(current_price >= trigger_price) {
                 bool higher_cluster_unswept = false;
                 for(int j = 0; j < ArraySize(active_resistances); j++) {
                     double other_res = active_resistances[j].price;
-                    bool apply_deep_other = active_resistances[j].deep_sweep && !disable_deep_sweep;
-                    if(other_res > raw_res_price && (other_res - raw_res_price) <= cluster_dist) { double other_trigger = other_res; if(apply_deep_other) other_trigger += (atr_m1[0] * DeepSweep_ATR); if(current_price < other_trigger) { higher_cluster_unswept = true; break; } }
+                    bool apply_deep_other = active_resistances[j].deep_sweep && !disable_sweep_req;
+                    bool apply_normal_other = Use_Normal_Sweep && !apply_deep_other && !disable_sweep_req;
+                    
+                    if(other_res > raw_res_price && (other_res - raw_res_price) <= cluster_dist) { 
+                        double other_trigger = other_res; 
+                        if(apply_deep_other) other_trigger += (atr_m1[0] * DeepSweep_ATR); 
+                        else if(apply_normal_other) other_trigger += (atr_m1[0] * NormalSweep_ATR);
+                        
+                        if(current_price < other_trigger) { higher_cluster_unswept = true; break; } 
+                    }
                 }
                 if(!higher_cluster_unswept) { valid_sweep_found = true; out_type = active_resistances[i].type; out_price = active_resistances[i].price; break; }
             }
@@ -2405,9 +2455,31 @@ void UpdateVisuals() {
     datetime current_time = iTime(_Symbol, _Period, 0); int highest_idx = iHighest(_Symbol, _Period, MODE_HIGH, SwingLookback, 1); int lowest_idx = iLowest(_Symbol, _Period, MODE_LOW, SwingLookback, 1);
     if(highest_idx > 0 && lowest_idx > 0) { double highest = iHigh(_Symbol, _Period, highest_idx); double lowest = iLow(_Symbol, _Period, lowest_idx); datetime t_high = iTime(_Symbol, _Period, highest_idx); datetime t_low = iTime(_Symbol, _Period, lowest_idx); if(t_high < t_low) UpdateFibo(t_high, highest, t_low, lowest); else UpdateFibo(t_low, lowest, t_high, highest); }
     ObjectsDeleteAll(0, "vis_lq_"); 
+    ObjectsDeleteAll(0, "vis_deep_");
     if(Show_Liquidity_Lines) {
         for(int i = 0; i < ArraySize(active_supports); i++) { string lbl = active_supports[i].type + (active_supports[i].deep_sweep ? " [DEEP]" : ""); DrawLiquidityLine("vis_lq_sup_" + IntegerToString(i), active_supports[i].time, active_supports[i].price, current_time, lbl, clrDodgerBlue); }
         for(int i = 0; i < ArraySize(active_resistances); i++) { string lbl = active_resistances[i].type + (active_resistances[i].deep_sweep ? " [DEEP]" : ""); DrawLiquidityLine("vis_lq_res_" + IntegerToString(i), active_resistances[i].time, active_resistances[i].price, current_time, lbl, clrCrimson); }
+    }
+    
+    if(Show_DeepSweep_Lines || Show_DeepSweep_Labels || Show_NormalSweep_Lines || Show_NormalSweep_Labels) {
+        for(int i = 0; i < ArraySize(active_supports); i++) { 
+            if(active_supports[i].deep_sweep) {
+                double req_price = active_supports[i].price - (atr_m1[0] * DeepSweep_ATR);
+                DrawDeepSweepLine("vis_deep_sup_" + IntegerToString(i), active_supports[i].time, req_price, current_time, "Deep Req", clrDodgerBlue, Show_DeepSweep_Lines, Show_DeepSweep_Labels);
+            } else if(Use_Normal_Sweep) {
+                double req_price = active_supports[i].price - (atr_m1[0] * NormalSweep_ATR);
+                DrawDeepSweepLine("vis_deep_sup_" + IntegerToString(i), active_supports[i].time, req_price, current_time, "Normal Req", clrDodgerBlue, Show_NormalSweep_Lines, Show_NormalSweep_Labels);
+            }
+        }
+        for(int i = 0; i < ArraySize(active_resistances); i++) { 
+            if(active_resistances[i].deep_sweep) {
+                double req_price = active_resistances[i].price + (atr_m1[0] * DeepSweep_ATR);
+                DrawDeepSweepLine("vis_deep_res_" + IntegerToString(i), active_resistances[i].time, req_price, current_time, "Deep Req", clrCrimson, Show_DeepSweep_Lines, Show_DeepSweep_Labels);
+            } else if(Use_Normal_Sweep) {
+                double req_price = active_resistances[i].price + (atr_m1[0] * NormalSweep_ATR);
+                DrawDeepSweepLine("vis_deep_res_" + IntegerToString(i), active_resistances[i].time, req_price, current_time, "Normal Req", clrCrimson, Show_NormalSweep_Lines, Show_NormalSweep_Labels);
+            }
+        }
     }
     DrawClusters(current_time); DrawContinuousBands(InpHTF1, handle_BB_M5, "vis_band_m5", M5_Visual_History, clrDarkOrange, 1, STYLE_SOLID, false); DrawContinuousBands(InpHTF2, handle_BB_H1, "vis_band_h1", H1_Visual_History, clrBlue, 1, STYLE_SOLID, true, clrDarkBlue);
 
@@ -2788,6 +2860,25 @@ void DrawLiquidityLine(string name, datetime t1, double price, datetime t2, stri
         ObjectSetInteger(0, text_name, OBJPROP_FONTSIZE, 9);
     } else {
         ObjectDelete(0, text_name); // remove if it was previously created
+    }
+}
+
+void DrawDeepSweepLine(string name, datetime t1, double price, datetime t2, string label_text, color col, bool show_line, bool show_label) {
+    string text_name = name + "_txt";
+    if(show_line) {
+        ObjectCreate(0, name, OBJ_TREND, 0, t1, price, t2, price);
+        ObjectSetInteger(0, name, OBJPROP_COLOR, col);
+        ObjectSetInteger(0, name, OBJPROP_STYLE, STYLE_DOT);
+        ObjectSetInteger(0, name, OBJPROP_RAY_RIGHT, false);
+        ObjectSetInteger(0, name, OBJPROP_WIDTH, 1);
+    }
+    
+    if(show_label) {
+        ObjectCreate(0, text_name, OBJ_TEXT, 0, t2, price);
+        ObjectSetString(0, text_name, OBJPROP_TEXT, " " + label_text);
+        ObjectSetInteger(0, text_name, OBJPROP_COLOR, col);
+        ObjectSetInteger(0, text_name, OBJPROP_ANCHOR, ANCHOR_LEFT_LOWER);
+        ObjectSetInteger(0, text_name, OBJPROP_FONTSIZE, 8);
     }
 }
 void UpdateFibo(datetime t1, double p1, datetime t2, double p2) { string name = "visual_swing_fibo"; if(ObjectFind(0, name) < 0) { ObjectCreate(0, name, OBJ_FIBO, 0, t1, p1, t2, p2); ObjectSetInteger(0, name, OBJPROP_COLOR, clrPurple); ObjectSetInteger(0, name, OBJPROP_LEVELCOLOR, clrPurple); ObjectSetInteger(0, name, OBJPROP_RAY_RIGHT, false); ObjectSetInteger(0, name, OBJPROP_LEVELS, 5); ObjectSetDouble(0, name, OBJPROP_LEVELVALUE, 0, 0.0); ObjectSetString(0, name, OBJPROP_LEVELTEXT, 0, "0.0"); ObjectSetDouble(0, name, OBJPROP_LEVELVALUE, 1, 0.382); ObjectSetString(0, name, OBJPROP_LEVELTEXT, 1, "38.2 (%)"); ObjectSetDouble(0, name, OBJPROP_LEVELVALUE, 2, 0.5); ObjectSetString(0, name, OBJPROP_LEVELTEXT, 2, "50.0 (%)"); ObjectSetDouble(0, name, OBJPROP_LEVELVALUE, 3, 0.618); ObjectSetString(0, name, OBJPROP_LEVELTEXT, 3, "61.8 (%)"); ObjectSetDouble(0, name, OBJPROP_LEVELVALUE, 4, 1.0); ObjectSetString(0, name, OBJPROP_LEVELTEXT, 4, "100.0"); } else { ObjectSetInteger(0, name, OBJPROP_TIME, 0, t1); ObjectSetDouble(0, name, OBJPROP_PRICE, 0, p1); ObjectSetInteger(0, name, OBJPROP_TIME, 1, t2); ObjectSetDouble(0, name, OBJPROP_PRICE, 1, p2); } }

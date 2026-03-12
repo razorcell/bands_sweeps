@@ -379,6 +379,43 @@
             border: 1px solid rgba(239, 68, 68, 0.3);
         }
 
+        /* Simple Loader Styles */
+        .loader-container {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background: rgba(15, 23, 42, 0.8);
+            z-index: 10;
+            border-radius: 12px;
+            transition: opacity 0.3s ease;
+        }
+
+        .loader-ring {
+            width: 40px;
+            height: 40px;
+            border: 4px solid var(--border-color);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin { 100% { transform: rotate(360deg); } }
+
+        .history-panel {
+            background: var(--panel-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 1rem 1.5rem;
+            backdrop-filter: var(--glass-blur);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 1rem;
+            margin-top: -1rem;
+        }
+
         @media (max-width: 1024px) {
             .charts-container {
                 grid-template-columns: 1fr;
@@ -409,15 +446,14 @@
                 <button class="btn">Select Additional Reports manually</button>
                 <input type="file" id="fileInput" multiple>
             </div>
-            
-            <div id="report-selector-container" style="display: none; margin-left: auto;">
-                <label for="reportSelect" style="color: var(--text-muted); margin-right: 10px;">Select Report:</label>
-                <select id="reportSelect" class="btn" style="appearance: auto; padding: 0.5rem 1rem;">
-                    <option value="all">All Combined Reports</option>
-                </select>
-            </div>
-            
             <div style="margin-left: 20px; color: var(--text-muted);" id="upload-status">Awaiting files...</div>
+        </div>
+
+        <div class="history-panel" id="report-selector-container" style="display: none;">
+            <label for="reportSelect" style="color: var(--text-muted); font-weight: 600;">Select Report:</label>
+            <select id="reportSelect" style="max-width: 400px; flex: 1; border: 1px solid var(--border-color); padding: 0.5rem 1rem; border-radius: 6px; background: #1e293b; color: var(--text-main); font-family: inherit; appearance: auto;"></select>
+            <button class="btn" style="padding: 0.5rem 1.5rem;" onclick="loadSelectedReport()">Load</button>
+            <button class="btn" style="padding: 0.5rem 1.5rem; background-color: var(--danger);" onclick="deleteSelectedReport()">Delete</button>
         </div>
 
         <div class="tabs" id="tabs-container" style="display: none;">
@@ -425,6 +461,7 @@
             <button class="tab-btn" onclick="switchTab('time-tab')">Time & Duration Edge</button>
             <button class="tab-btn" onclick="switchTab('sequence-tab')">Sequence & Direction Edge</button>
             <button class="tab-btn" onclick="switchTab('calendar-tab')">Calendar View</button>
+            <button class="tab-btn" onclick="switchTab('quant-tab')">Quantitative Edge</button>
         </div>
 
         <div id="speed-tab" class="tab-content active">
@@ -570,6 +607,86 @@
             </div>
         </div>
 
+        <!-- QUANTITATIVE EDGE TAB INFO -->
+        <div id="quant-tab" class="tab-content">
+            <div id="quant-header-info" style="display: flex; gap: 2rem; background: var(--panel-bg); border: 1px solid var(--border-color); border-radius: 12px; padding: 1rem 1.5rem; backdrop-filter: var(--glass-blur);">
+                <div>
+                    <div style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px;">Analyzed Trades</div>
+                    <div style="font-size: 1.25rem; font-weight: 700; color: var(--text-main);" id="quantTotalTrades">-</div>
+                </div>
+                <div>
+                    <div style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px;">Trading Period</div>
+                    <div style="font-size: 1.25rem; font-weight: 700; color: var(--text-main);" id="quantPeriod">-</div>
+                </div>
+                <div>
+                    <div style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px;">Analyzed Symbol</div>
+                    <div style="font-size: 1.25rem; font-weight: 700; color: var(--text-main);" id="quantSymbol">-</div>
+                </div>
+            </div>
+
+            <div class="stats-grid" id="quant-stats">
+                 <div class="stat-card">
+                    <div class="stat-title">Profit Factor</div>
+                    <div style="font-size: 0.70rem; color: var(--text-muted); margin-bottom: 0.5rem; line-height: 1.2;">Ratio of gross profit to gross loss. >1 means profitable, >1.5 is good edge.</div>
+                    <div class="stat-value" id="profitFactor">-</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-title">Expectancy</div>
+                    <div style="font-size: 0.70rem; color: var(--text-muted); margin-bottom: 0.5rem; line-height: 1.2;">The statistical average profit you expect to make per individual trade.</div>
+                    <div class="stat-value" id="expectancy">-</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-title">Monte Carlo Median Max DD</div>
+                    <div style="font-size: 0.70rem; color: var(--text-muted); margin-bottom: 0.5rem; line-height: 1.2;">The average worst-case drawdown expected if trades occur in a different random order.</div>
+                    <div class="stat-value negative" id="mcMaxDD">-</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-title">Risk of Negative Return</div>
+                    <div style="font-size: 0.70rem; color: var(--text-muted); margin-bottom: 0.5rem; line-height: 1.2;">Probability of ending up with a net loss after all trades based on 2000 simulations.</div>
+                    <div class="stat-value" id="riskOfRuin">-</div>
+                </div>
+            </div>
+            <div class="charts-container">
+                <div class="chart-box" style="position: relative;">
+                    <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 20px;">
+                        <div>
+                            <h3 style="margin-top:0;">Monte Carlo Equity Curves (<span id="mcNumSimPaths">...</span> Paths)</h3>
+                            <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: -5px; margin-bottom: 10px; line-height: 1.4;">Visualizes possible outcomes of your strategy by shuffling and resampling your trades with replacement. Helps reveal if your chronological backtest result was just lucky (e.g. all your winning streaks happened together).</p>
+                        </div>
+                        <div style="display: flex; gap: 10px; align-items: stretch; background: rgba(0,0,0,0.15); padding: 8px 12px; border-radius: 8px; border: 1px solid var(--border-color); flex-shrink: 0;">
+                            <div style="display: flex; flex-direction: column; gap: 6px;">
+                                <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px;">
+                                    <label style="font-size: 0.75rem; color: var(--text-muted);">Paths:</label>
+                                    <input type="number" id="inputMcPaths" value="100" min="10" max="1000" style="width: 70px; padding: 2px 6px; border-radius: 4px; background: var(--bg-color); border: 1px solid var(--border-color); color: var(--text-color); font-size: 0.85rem; text-align: center;">
+                                </div>
+                                <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px;">
+                                    <label style="font-size: 0.75rem; color: var(--text-muted);">Sims:</label>
+                                    <input type="number" id="inputMcSims" value="2000" min="100" max="10000" style="width: 70px; padding: 2px 6px; border-radius: 4px; background: var(--bg-color); border: 1px solid var(--border-color); color: var(--text-color); font-size: 0.85rem; text-align: center;">
+                                </div>
+                            </div>
+                            <button class="btn" id="refreshMcBtn" style="padding: 0 15px; font-size: 0.8rem; border-radius: 6px; display: flex; align-items: center; justify-content: center;" onclick="refreshMonteCarlo()">↻ Refresh</button>
+                        </div>
+                    </div>
+                    <div style="position: relative; height: 350px;">
+                        <canvas id="mcPathsChart"></canvas>
+                        <div id="pathsLoader" class="loader-container">
+                            <div class="loader-ring"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="chart-box" style="position: relative;">
+                    <h3 style="margin-top:0;">Monte Carlo Final P/L Distribution (<span id="mcTotalSims">...</span> Sims)</h3>
+                    <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: -5px; margin-bottom: 10px; line-height: 1.4;">A bell curve (histogram) showing where your final account balance ends up across all simulations. A reliable edge will have the entire cluster of bars shifted far out into the positive (green) territory.</p>
+                    <div style="position: relative; height: 350px;">
+                        <canvas id="mcDistChart"></canvas>
+                        <div id="distLoader" class="loader-container">
+                            <div class="loader-ring"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <div id="bucket-details-overlay" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(15, 23, 42, 0.8); z-index: 1000; backdrop-filter: blur(8px); align-items: center; justify-content: center; padding: 2rem;" onclick="if(event.target === this) hideBucketDetails()">
             <div id="bucket-details-container" style="background: var(--panel-bg); border: 1px solid var(--border-color); border-radius: 12px; padding: 1.5rem; width: 100%; max-width: 1200px; max-height: 85vh; display: flex; flex-direction: column; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-shrink: 0;">
@@ -604,25 +721,73 @@
     </div>
 
     <script>
+        // --- Lightweight IndexedDB Wrapper for Storage ---
+        const dbPromise = new Promise((resolve, reject) => {
+            const request = indexedDB.open('MT5AnalyzerDB', 1);
+            request.onupgradeneeded = (e) => {
+                const db = e.target.result;
+                if (!db.objectStoreNames.contains('reports')) {
+                    db.createObjectStore('reports');
+                }
+            };
+            request.onsuccess = (e) => resolve(e.target.result);
+            request.onerror = (e) => reject('Database error: ' + e.target.errorCode);
+        });
+
+        async function saveToDB(key, val) {
+            const db = await dbPromise;
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction('reports', 'readwrite');
+                const store = tx.objectStore('reports');
+                const req = store.put(val, key);
+                req.onsuccess = () => resolve();
+                req.onerror = () => reject(req.error);
+            });
+        }
+
+        async function loadFromDB(key) {
+            const db = await dbPromise;
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction('reports', 'readonly');
+                const store = tx.objectStore('reports');
+                const req = store.get(key);
+                req.onsuccess = () => resolve(req.result);
+                req.onerror = () => reject(req.error);
+            });
+        }
+
         let currentCalendarZoom = 1.0;
         // Chart instances
         let scatterChartInstance = null;
         let barChartInstance = null;
         let allReports = [];
+        let currentTrades = []; // cache last loaded trades for MC-only refresh
+        
+        // State controllers
+        let forceMcRecalc = false;
+        function refreshMonteCarlo() {
+            if (!currentTrades || currentTrades.length === 0) return;
+            const btn = document.getElementById('refreshMcBtn');
+            if (btn) {
+                btn.disabled = true;
+                btn.innerHTML = '<div class="loader-ring" style="width:14px;height:14px;border-width:2px;margin-right:6px;border-top-color:white;"></div> Refreshing...';
+            }
+            forceMcRecalc = true;
+            renderQuant(currentTrades);
+        }
 
         document.getElementById('fileInput').addEventListener('change', handleFiles);
-        document.getElementById('reportSelect').addEventListener('change', handleReportSelection);
         document.getElementById('directionFilter').addEventListener('change', handleReportSelection);
 
-        document.addEventListener('DOMContentLoaded', () => {
-            // Load existing reports from local storage
-            const storedReports = localStorage.getItem('mt5EdgeReports');
-            if (storedReports) {
-                try {
-                    allReports = JSON.parse(storedReports);
-                } catch(e) {
-                    console.error("Failed to parse local storage reports", e);
+        document.addEventListener('DOMContentLoaded', async () => {
+            // Load existing reports from IndexedDB
+            try {
+                const storedReports = await loadFromDB('mt5EdgeReports');
+                if (storedReports) {
+                    allReports = storedReports;
                 }
+            } catch(e) {
+                console.error("Failed to load IndexedDB reports", e);
             }
             
             // If python auto-injected reports exist (via trades_data.js), merge them
@@ -637,8 +802,8 @@
                 });
                 // Clear the auto-loaded var so it doesn't artificially keep appending identical objects
                 window.autoLoadedReports = [];
-                // Save the merged data back to local storage
-                saveToLocalStorage();
+                // Save the merged data back to storage
+                saveReportsToStorage();
             }
             
             if (allReports.length > 0) {
@@ -649,7 +814,7 @@
                 populateReportDropdown();
                 
                 // Attempt to restore last selected report
-                const lastSelectedFilename = localStorage.getItem('mt5LastSelectedReport');
+                const lastSelectedFilename = await loadFromDB('mt5LastSelectedReport');
                 if (lastSelectedFilename) {
                     const select = document.getElementById('reportSelect');
                     if (lastSelectedFilename === "all") {
@@ -666,15 +831,51 @@
             }
         });
         
-        function saveToLocalStorage() {
-            try {
-                localStorage.setItem('mt5EdgeReports', JSON.stringify(allReports));
-            } catch(e) {
-                console.error("Local storage is full or disabled", e);
-                document.getElementById('upload-status').innerHTML = `<span class="negative">Warning: Too many reports, cannot save to local storage.</span>`;
-            }
+        function saveReportsToStorage() {
+            saveToDB('mt5EdgeReports', allReports).catch(e => {
+                console.error("IndexedDB storage failed", e);
+                document.getElementById('upload-status').innerHTML = `<span class="negative">Warning: Storage failed.</span>`;
+            });
         }
         
+        function loadSelectedReport() {
+            handleReportSelection();
+        }
+
+        function deleteSelectedReport() {
+            const select = document.getElementById('reportSelect');
+            const val = select.value;
+
+            if (val === 'all') {
+                if (confirm('Are you sure you want to delete ALL reports?')) {
+                    allReports = [];
+                    saveReportsToStorage();
+                    document.getElementById('report-selector-container').style.display = 'none';
+                    document.getElementById('floating-direction-filter').style.display = 'none';
+                    document.getElementById('tabs-container').style.display = 'none';
+                    document.getElementById('upload-status').innerHTML = 'Awaiting manual report upload...';
+                }
+            } else {
+                const selectedIdx = parseInt(val);
+                if (allReports[selectedIdx]) {
+                    if (confirm(`Are you sure you want to delete the report: ${allReports[selectedIdx].filename}?`)) {
+                        allReports.splice(selectedIdx, 1);
+                        saveReportsToStorage();
+                        if (allReports.length === 0) {
+                            document.getElementById('report-selector-container').style.display = 'none';
+                            document.getElementById('floating-direction-filter').style.display = 'none';
+                            document.getElementById('tabs-container').style.display = 'none';
+                            document.getElementById('upload-status').innerHTML = 'Awaiting manual report upload...';
+                        } else {
+                            populateReportDropdown();
+                            select.value = 'all';
+                            handleReportSelection();
+                        }
+                    }
+                }
+            }
+        }
+
         function populateReportDropdown() {
             const select = document.getElementById('reportSelect');
             // Keep the "All Combined Reports" option
@@ -697,7 +898,7 @@
             
             let tradesToShow = [];
             if (val === "all") {
-                localStorage.setItem('mt5LastSelectedReport', 'all');
+                saveToDB('mt5LastSelectedReport', 'all').catch(e => console.error(e));
                 const uniqueTrades = new Set();
                 allReports.forEach(report => {
                     report.trades.forEach(t => {
@@ -711,7 +912,7 @@
             } else {
                 const selectedIdx = parseInt(val);
                 if (allReports[selectedIdx]) {
-                    localStorage.setItem('mt5LastSelectedReport', allReports[selectedIdx].filename);
+                    saveToDB('mt5LastSelectedReport', allReports[selectedIdx].filename).catch(e => console.error(e));
                     tradesToShow = allReports[selectedIdx].trades;
                 }
             }
@@ -723,6 +924,7 @@
             
             if (tradesToShow.length > 0) {
                 document.getElementById('tabs-container').style.display = 'flex';
+                currentTrades = tradesToShow;
                 updateDashboard(tradesToShow);
             } else {
                 // If filtered out entirely
@@ -739,7 +941,16 @@
             const files = Array.from(event.target.files);
             if (files.length === 0) return;
 
-            document.getElementById('upload-status').textContent = `Processing ${files.length} file(s)...`;
+            document.getElementById('upload-status').innerHTML = `
+                <div style="display:flex; align-items:center; gap:10px;">
+                    <div class="loader-ring" style="width:20px;height:20px;border-width:3px;margin:0;"></div>
+                    <span>Processing ${files.length} file(s)...</span>
+                </div>
+            `;
+            
+            // Critical: Yield immediately so the browser actually paints the loader above
+            await new Promise(r => setTimeout(r, 50));
+            
             allTradesExtracted = [];
 
             for (const file of files) {
@@ -758,7 +969,7 @@
                 }
             }
             
-            saveToLocalStorage();
+            saveReportsToStorage();
             
             let totalTrades = 0;
             allReports.forEach(r => totalTrades += r.trades.length);
@@ -793,14 +1004,31 @@
                         htmlString = new TextDecoder('utf-8').decode(arrayBuffer);
                     }
 
+                    const trades = [];
+
+                    // Fast path for JSON exports if they uploaded a JSON directly
+                    if (file.name.endsWith('.json')) {
+                        try {
+                            const data = JSON.parse(htmlString);
+                            if (data.trades && Array.isArray(data.trades)) {
+                                resolve(data.trades);
+                            } else {
+                                resolve([]);
+                            }
+                        } catch(e) { console.error(e); resolve([]); }
+                        return;
+                    }
+
                     const parser = new DOMParser();
                     const doc = parser.parseFromString(htmlString, 'text/html');
                     const tables = doc.querySelectorAll('table');
-                    const trades = [];
+                    
+                    let foundTable = false;
 
-                    tables.forEach(table => {
+                    for (let t = 0; t < tables.length; t++) {
+                        const table = tables[t];
                         const rows = table.querySelectorAll('tr');
-                        if (rows.length < 2) return;
+                        if (rows.length < 2) continue;
 
                         let dirIdx = -1;
                         let headerIdx = -1;
@@ -810,13 +1038,15 @@
                         let typeIdx = -1;
                         let volIdx = -1;
                         let priceIdx = -1;
+                        let symbolIdx = -1;
 
                         // Scan all rows to find the actual table headers (in MT5 this could be row 700+)
                         for (let r = 0; r < rows.length; r++) {
-                            const tds = rows[r].querySelectorAll('td, th');
+                            const tds = rows[r].children;
                             let foundProfit = false;
                             
-                            tds.forEach((td, idx) => {
+                            for (let idx = 0; idx < tds.length; idx++) {
+                                const td = tds[idx];
                                 const text = td.textContent.trim().toLowerCase();
                                 if (text === 'profit') { profitIdx = idx; foundProfit = true; }
                                 if (text === 'comment' || text === 'comments') commentIdx = idx;
@@ -825,7 +1055,8 @@
                                 if (text === 'type') typeIdx = idx;
                                 if (text === 'volume' || text === 'size') volIdx = idx;
                                 if (text === 'price') priceIdx = idx;
-                            });
+                                if (text === 'symbol' || text === 'item') symbolIdx = idx;
+                            }
                             
                             // We need profit and comment. Break if we found profit in THIS row.
                             if (profitIdx !== -1 && commentIdx !== -1 && foundProfit) {
@@ -835,6 +1066,7 @@
                         }
 
                         if (headerIdx !== -1) {
+                            foundTable = true;
                             let pendingSpeed = null;
                             let pendingPrevSpeed = null;
                             let pendingTimeSec = null;
@@ -844,110 +1076,137 @@
                             let pendingVolume = null;
                             let pendingEntryPrice = null;
                             
-                            for (let r = headerIdx + 1; r < rows.length; r++) {
-                                const cells = rows[r].querySelectorAll('td');
-                                if (cells.length > Math.max(profitIdx, commentIdx)) {
-                                    const profitText = cells[profitIdx].textContent.trim();
-                                    const commentText = cells[commentIdx].textContent.trim();
-                                    const direction = dirIdx !== -1 && cells.length > dirIdx ? cells[dirIdx].textContent.trim().toLowerCase() : "";
-                                    const tradeTime = timeIdx !== -1 && cells.length > timeIdx ? cells[timeIdx].textContent.trim() : "";
-                                    const tradeType = typeIdx !== -1 && cells.length > typeIdx ? cells[typeIdx].textContent.trim().toLowerCase() : "";
-                                    const volText = volIdx !== -1 && cells.length > volIdx ? cells[volIdx].textContent.trim() : "";
-                                    const priceText = priceIdx !== -1 && cells.length > priceIdx ? cells[priceIdx].textContent.trim() : "";
-                                    
-                                    if (direction === 'in') {
-                                        const speed4dMatch = commentText.match(/(?:B|S)\|(-?\d+(?:\.\d+)?)\|(-?\d+(?:\.\d+)?)\|(\d+)/i);
-                                        const speedMatch = commentText.match(/\|\s*(-?\d+(?:\.\d+)?)\s*pts\/s/i) || 
-                                                           commentText.match(/speed.*?(-?\d+(?:\.\d+)?)/i) || 
-                                                           commentText.match(/spd.*?(-?\d+(?:\.\d+)?)/i);
+                            let r = headerIdx + 1;
+                            const chunkSize = 2000;
+                            
+                            function processRowChunk() {
+                                const end = Math.min(r + chunkSize, rows.length);
+                                for (; r < end; r++) {
+                                    const cells = rows[r].children;
+                                    if (cells.length > Math.max(profitIdx, commentIdx)) {
+                                        const profitText = cells[profitIdx].textContent.trim();
+                                        const commentText = cells[commentIdx].textContent.trim();
+                                        const direction = dirIdx !== -1 && cells.length > dirIdx ? cells[dirIdx].textContent.trim().toLowerCase() : "";
+                                        const tradeTime = timeIdx !== -1 && cells.length > timeIdx ? cells[timeIdx].textContent.trim() : "";
+                                        const tradeType = typeIdx !== -1 && cells.length > typeIdx ? cells[typeIdx].textContent.trim().toLowerCase() : "";
+                                        const volText = volIdx !== -1 && cells.length > volIdx ? cells[volIdx].textContent.trim() : "";
+                                        const priceText = priceIdx !== -1 && cells.length > priceIdx ? cells[priceIdx].textContent.trim() : "";
+                                        const symbolText = symbolIdx !== -1 && cells.length > symbolIdx ? cells[symbolIdx].textContent.trim() : "";
                                         
-                                        if (speed4dMatch) {
-                                            pendingSpeed = parseFloat(speed4dMatch[1]);
-                                            pendingPrevSpeed = parseFloat(speed4dMatch[2]);
-                                            pendingTimeSec = parseInt(speed4dMatch[3], 10);
-                                            pendingComment = commentText;
-                                            pendingEntryTime = tradeTime;
-                                            pendingTradeType = tradeType;
-                                            pendingVolume = volText;
-                                            pendingEntryPrice = priceText;
-                                        } else if (speedMatch) {
-                                            pendingSpeed = parseFloat(speedMatch[1]);
-                                            pendingComment = commentText;
-                                            pendingEntryTime = tradeTime;
-                                            pendingTradeType = tradeType;
-                                            pendingVolume = volText;
-                                            pendingEntryPrice = priceText;
-                                        }
-                                    } else if (direction === 'out' && pendingSpeed !== null) {
-                                        const cleanProfit = profitText.replace(/[^\d.-]/g, '');
-                                        const profit = parseFloat(cleanProfit);
-                                        if (!isNaN(profit)) {
-                                            let tradeObj = { 
-                                                profit, 
-                                                speed: pendingSpeed, 
-                                                comment: pendingComment,
-                                                entry_time: pendingEntryTime,
-                                                exit_time: tradeTime,
-                                                trade_type: pendingTradeType,
-                                                volume: pendingVolume || volText,
-                                                entry_price: pendingEntryPrice,
-                                                exit_price: priceText
-                                            };
-                                            if (pendingPrevSpeed !== null) {
-                                                tradeObj.prev_speed = pendingPrevSpeed;
-                                                tradeObj.time_sec = pendingTimeSec;
-                                            }
-                                            trades.push(tradeObj);
-                                        }
-                                        pendingSpeed = null;
-                                        pendingPrevSpeed = null;
-                                        pendingTimeSec = null;
-                                        pendingComment = null;
-                                        pendingVolume = null;
-                                        pendingEntryPrice = null;
-                                    } else if (direction === "") {
-                                        const speed4dMatch = commentText.match(/(?:B|S)\|(-?\d+(?:\.\d+)?)\|(-?\d+(?:\.\d+)?)\|(\d+)/i);
-                                        const speedMatch = commentText.match(/\|\s*(-?\d+(?:\.\d+)?)\s*pts\/s/i) || 
-                                                           commentText.match(/speed.*?(-?\d+(?:\.\d+)?)/i) || 
-                                                           commentText.match(/spd.*?(-?\d+(?:\.\d+)?)/i);
-                                        const cleanProfit = profitText.replace(/[^\d.-]/g, '');
-                                        const profit = parseFloat(cleanProfit);
-                                        if (!isNaN(profit) && profit !== 0) {
+                                        if (direction === 'in') {
+                                            const speed4dMatch = commentText.match(/(?:B|S)\|(-?\d+(?:\.\d+)?)\|(-?\d+(?:\.\d+)?)\|(\d+)/i);
+                                            const speedMatch = commentText.match(/\|\s*(-?\d+(?:\.\d+)?)\s*pts\/s/i) || 
+                                                               commentText.match(/speed.*?(-?\d+(?:\.\d+)?)/i) || 
+                                                               commentText.match(/spd.*?(-?\d+(?:\.\d+)?)/i);
+                                            
                                             if (speed4dMatch) {
-                                                trades.push({ 
-                                                    profit, 
-                                                    speed: parseFloat(speed4dMatch[1]), 
-                                                    prev_speed: parseFloat(speed4dMatch[2]),
-                                                    time_sec: parseInt(speed4dMatch[3], 10),
-                                                    comment: commentText,
-                                                    entry_time: tradeTime,
-                                                    exit_time: tradeTime,
-                                                    trade_type: tradeType,
-                                                    volume: volText,
-                                                    entry_price: priceText,
-                                                    exit_price: priceText
-                                                });
+                                                pendingSpeed = parseFloat(speed4dMatch[1]);
+                                                pendingPrevSpeed = parseFloat(speed4dMatch[2]);
+                                                pendingTimeSec = parseInt(speed4dMatch[3], 10);
+                                                pendingComment = commentText;
+                                                pendingEntryTime = tradeTime;
+                                                pendingTradeType = tradeType;
+                                                pendingVolume = volText;
+                                                pendingEntryPrice = priceText;
                                             } else if (speedMatch) {
-                                                trades.push({ 
+                                                pendingSpeed = parseFloat(speedMatch[1]);
+                                                pendingComment = commentText;
+                                                pendingEntryTime = tradeTime;
+                                                pendingTradeType = tradeType;
+                                                pendingVolume = volText;
+                                                pendingEntryPrice = priceText;
+                                            }
+                                        } else if (direction === 'out' && pendingSpeed !== null) {
+                                            const cleanProfit = profitText.replace(/[^\d.-]/g, '');
+                                            const profit = parseFloat(cleanProfit);
+                                            if (!isNaN(profit)) {
+                                                let tradeObj = { 
                                                     profit, 
-                                                    speed: parseFloat(speedMatch[1]), 
-                                                    comment: commentText,
-                                                    entry_time: tradeTime,
+                                                    speed: pendingSpeed, 
+                                                    comment: pendingComment,
+                                                    entry_time: pendingEntryTime,
                                                     exit_time: tradeTime,
-                                                    trade_type: tradeType,
-                                                    volume: volText,
-                                                    entry_price: priceText,
-                                                    exit_price: priceText
-                                                });
+                                                    trade_type: pendingTradeType,
+                                                    volume: pendingVolume || volText,
+                                                    entry_price: pendingEntryPrice,
+                                                    exit_price: priceText,
+                                                    symbol: symbolText
+                                                };
+                                                if (pendingPrevSpeed !== null) {
+                                                    tradeObj.prev_speed = pendingPrevSpeed;
+                                                    tradeObj.time_sec = pendingTimeSec;
+                                                }
+                                                trades.push(tradeObj);
+                                            }
+                                            pendingSpeed = null;
+                                            pendingPrevSpeed = null;
+                                            pendingTimeSec = null;
+                                            pendingComment = null;
+                                            pendingVolume = null;
+                                            pendingEntryPrice = null;
+                                        } else if (direction === "") {
+                                            const speed4dMatch = commentText.match(/(?:B|S)\|(-?\d+(?:\.\d+)?)\|(-?\d+(?:\.\d+)?)\|(\d+)/i);
+                                            const speedMatch = commentText.match(/\|\s*(-?\d+(?:\.\d+)?)\s*pts\/s/i) || 
+                                                               commentText.match(/speed.*?(-?\d+(?:\.\d+)?)/i) || 
+                                                               commentText.match(/spd.*?(-?\d+(?:\.\d+)?)/i);
+                                            const cleanProfit = profitText.replace(/[^\d.-]/g, '');
+                                            const profit = parseFloat(cleanProfit);
+                                            if (!isNaN(profit) && profit !== 0) {
+                                                if (speed4dMatch) {
+                                                    trades.push({ 
+                                                        profit, 
+                                                        speed: parseFloat(speed4dMatch[1]), 
+                                                        prev_speed: parseFloat(speed4dMatch[2]),
+                                                        time_sec: parseInt(speed4dMatch[3], 10),
+                                                        comment: commentText,
+                                                        entry_time: tradeTime,
+                                                        exit_time: tradeTime,
+                                                        trade_type: tradeType,
+                                                        volume: volText,
+                                                        entry_price: priceText,
+                                                        exit_price: priceText,
+                                                        symbol: symbolText
+                                                    });
+                                                } else if (speedMatch) {
+                                                    trades.push({ 
+                                                        profit, 
+                                                        speed: parseFloat(speedMatch[1]), 
+                                                        comment: commentText,
+                                                        entry_time: tradeTime,
+                                                        exit_time: tradeTime,
+                                                        trade_type: tradeType,
+                                                        volume: volText,
+                                                        entry_price: priceText,
+                                                        exit_price: priceText,
+                                                        symbol: symbolText
+                                                    });
+                                                }
                                             }
                                         }
                                     }
                                 }
+                                
+                                if (r < rows.length) {
+                                    document.getElementById('upload-status').innerHTML = `
+                                        <div style="display:flex; align-items:center; gap:10px;">
+                                            <div class="loader-ring" style="width:20px;height:20px;border-width:3px;margin:0;"></div>
+                                            <span>Parsing Rows: ${r} / ${rows.length}...</span>
+                                        </div>
+                                    `;
+                                    setTimeout(processRowChunk, 5); // Yield UI
+                                } else {
+                                    resolve(trades); // Loop fully done!
+                                }
                             }
+                            
+                            // Start processing chunks
+                            processRowChunk();
+                            return; // Stop searching other tables, wait for chunks to finish and resolve()
                         }
-                    });
-
-                    resolve(trades);
+                    }
+                    
+                    // Fallthrough if no headers found
+                    if (!foundTable) resolve(trades);
                 };
                 reader.onerror = (e) => reject(e);
                 reader.readAsArrayBuffer(file);
@@ -1105,12 +1364,321 @@
 
             renderCharts(trades, speedBuckets, durationData, hourBuckets, streakCounts, longProfit, shortProfit);
             renderCalendar(trades);
+            renderQuant(trades);
         }
 
         let durationScatterChartInstance = null;
         let timeOfDayBarChartInstance = null;
         let directionPieChartInstance = null;
         let streakBarChartInstance = null;
+        let mcPathsChartInstance = null;
+        let mcDistChartInstance = null;
+
+        function renderQuant(trades) {
+            if (!trades || trades.length === 0) return;
+            
+            // Populate Header Info
+            document.getElementById('quantTotalTrades').textContent = trades.length;
+            
+            // Determine trading period
+            let minTime = null;
+            let maxTime = null;
+            trades.forEach(t => {
+                if (t.entry_time) {
+                    const timeObj = new Date(t.entry_time.replace(/\./g, '/'));
+                    if (!isNaN(timeObj)) {
+                        if (minTime === null || timeObj < minTime) minTime = timeObj;
+                        if (maxTime === null || timeObj > maxTime) maxTime = timeObj;
+                    }
+                }
+            });
+            
+            if (minTime && maxTime) {
+                const formatDate = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+                document.getElementById('quantPeriod').textContent = `${formatDate(minTime)} to ${formatDate(maxTime)}`;
+            } else {
+                document.getElementById('quantPeriod').textContent = 'Unknown';
+            }
+            
+            // Extract the symbol from trades and show the dominant one or "Multiple"
+            let symbolSet = new Set();
+            let dominantSymbolCount = {};
+            trades.forEach(t => {
+                if (t.symbol && t.symbol !== '-') {
+                    symbolSet.add(t.symbol);
+                    dominantSymbolCount[t.symbol] = (dominantSymbolCount[t.symbol] || 0) + 1;
+                }
+            });
+            const validSymbols = Array.from(symbolSet);
+            if (validSymbols.length === 1) {
+                document.getElementById('quantSymbol').textContent = validSymbols[0];
+            } else if (validSymbols.length > 1) {
+                document.getElementById('quantSymbol').textContent = 'Multiple';
+            } else {
+                document.getElementById('quantSymbol').textContent = 'Unknown';
+            }
+
+            let grossProfit = 0;
+            let grossLoss = 0;
+            let wins = 0;
+            let losses = 0;
+            trades.forEach(t => {
+                if (t.profit > 0) { grossProfit += t.profit; wins++; }
+                else if (t.profit < 0) { grossLoss += Math.abs(t.profit); losses++; }
+            });
+            
+            // Clear basic stats initially
+            document.getElementById('profitFactor').textContent = '...';
+            document.getElementById('expectancy').textContent = '...';
+            document.getElementById('mcMaxDD').textContent = '...';
+            document.getElementById('riskOfRuin').textContent = '...';
+            
+            // Show loaders
+            const pLoader = document.getElementById('pathsLoader');
+            const dLoader = document.getElementById('distLoader');
+            if (pLoader) pLoader.style.opacity = '1';
+            if (pLoader) pLoader.style.pointerEvents = 'auto';
+            if (dLoader) dLoader.style.opacity = '1';
+            if (dLoader) dLoader.style.pointerEvents = 'auto';
+
+            // 1. Basic Quant Stats (Fast)
+            setTimeout(() => {
+                const profitFactor = grossLoss > 0 ? (grossProfit / grossLoss).toFixed(2) : (grossProfit > 0 ? '∞' : '0');
+                const winRate = wins / trades.length;
+                const lossRate = losses / trades.length;
+                const avgWin = wins > 0 ? grossProfit / wins : 0;
+                const avgLoss = losses > 0 ? grossLoss / losses : 0;
+                const expectancy = (avgWin * winRate) - (avgLoss * lossRate);
+                
+                document.getElementById('profitFactor').textContent = profitFactor;
+                const expEl = document.getElementById('expectancy');
+                expEl.textContent = `$${expectancy.toFixed(2)}`;
+                expEl.className = 'stat-value ' + (expectancy >= 0 ? 'positive' : 'negative');
+            }, 50);
+            
+            // 2. Monte Carlo Simulation Execution
+            const pathsInputEl = document.getElementById('inputMcPaths');
+            const simsInputEl = document.getElementById('inputMcSims');
+            
+            const NUM_SIMULATIONS = simsInputEl ? (parseInt(simsInputEl.value) || 2000) : 2000;
+            const requestedPaths = pathsInputEl ? (parseInt(pathsInputEl.value) || 100) : 100;
+            const NUM_TRADES = trades.length;
+
+            const mcDistSimCountLabel = document.getElementById('mcTotalSims');
+            if (mcDistSimCountLabel) mcDistSimCountLabel.innerText = NUM_SIMULATIONS;
+
+            // Plotted paths configuration
+            const numPathsToPlot = Math.min(requestedPaths, NUM_SIMULATIONS);
+            const mcPathTotalSimsLabel = document.getElementById('mcNumSimPaths');
+            if (mcPathTotalSimsLabel) mcPathTotalSimsLabel.innerText = numPathsToPlot;
+
+            // Check if we have cached results for this specific report (by looking at active selected info in allReports)
+            let cachedResult = null;
+            const selectVal = document.getElementById('reportSelect').value;
+            const directionVal = document.getElementById('directionFilter').value;
+            
+            if (selectVal !== 'all' && directionVal === 'all') {
+                const reportObj = allReports[parseInt(selectVal)];
+                if (reportObj && reportObj.mcCache 
+                    && reportObj.mcCache.numTrades === NUM_TRADES 
+                    && reportObj.mcCache.numSims === NUM_SIMULATIONS
+                    && reportObj.mcCache.numPaths === numPathsToPlot
+                    && !forceMcRecalc) {
+                    cachedResult = reportObj.mcCache;
+                }
+            }
+            
+            // Reset force calculation flag down the chain
+            forceMcRecalc = false;
+
+            let finalProfits = [];
+            let maxDrawdowns = [];
+            let ruinedCount = 0;
+            let pathsToPlot = [];
+
+            if (cachedResult) {
+                // Instantly load from cache
+                finalProfits = cachedResult.finalProfits;
+                maxDrawdowns = cachedResult.maxDrawdowns;
+                ruinedCount = cachedResult.ruinedCount;
+                pathsToPlot = cachedResult.pathsToPlot;
+                finishMonteCarlo();
+            } else {
+                // Otherwise calculate
+                const profits = trades.map(t => t.profit);
+                let currentSimIndex = 0;
+                const chunkSize = 50; 
+
+                function processChunk() {
+                    const end = Math.min(currentSimIndex + chunkSize, NUM_SIMULATIONS);
+                    for (let i = currentSimIndex; i < end; i++) {
+                        let currentEquity = 0;
+                        let peakEquity = 0;
+                        let maxDD = 0;
+                        let path = new Float64Array(NUM_TRADES + 1);
+                        path[0] = 0;
+                        
+                        for (let j = 0; j < NUM_TRADES; j++) {
+                            const randIdx = Math.floor(Math.random() * NUM_TRADES);
+                            currentEquity += profits[randIdx];
+                            if (currentEquity > peakEquity) peakEquity = currentEquity;
+                            const dd = peakEquity - currentEquity;
+                            if (dd > maxDD) maxDD = dd;
+                            
+                            if (i < numPathsToPlot) path[j+1] = currentEquity;
+                        }
+                        
+                        finalProfits.push(currentEquity);
+                        maxDrawdowns.push(maxDD);
+                        if (currentEquity < 0) ruinedCount++;
+                        if (i < numPathsToPlot) {
+                            const downsampledPath = [];
+                            const stepSize = Math.max(1, Math.floor(NUM_TRADES / 250)); // Max 250 points
+                            for (let k = 0; k <= NUM_TRADES; k += stepSize) {
+                                downsampledPath.push({ x: k, y: path[k] });
+                            }
+                            if (NUM_TRADES % stepSize !== 0) {
+                                downsampledPath.push({ x: NUM_TRADES, y: path[NUM_TRADES] }); // Ensure last point is added
+                            }
+                            pathsToPlot.push(downsampledPath);
+                        }
+                    }
+                    
+                    currentSimIndex = end;
+                    if (currentSimIndex < NUM_SIMULATIONS) {
+                        setTimeout(processChunk, 15);
+                    } else {
+                        setTimeout(processSorting, 15);
+                    }
+                }
+
+                function processSorting() {
+                    finalProfits.sort((a, b) => a - b);
+                    maxDrawdowns.sort((a, b) => a - b);
+                    
+                    // Save to cache if applicable
+                    if (selectVal !== 'all' && directionVal === 'all') {
+                        const reportObj = allReports[parseInt(selectVal)];
+                        if (reportObj) {
+                            reportObj.mcCache = {
+                                numTrades: NUM_TRADES,
+                                numSims: NUM_SIMULATIONS,
+                                numPaths: numPathsToPlot,
+                                finalProfits, maxDrawdowns, ruinedCount, pathsToPlot
+                            };
+                            saveReportsToStorage(); // persist cache
+                        }
+                    }
+                    setTimeout(finishMonteCarlo, 15);
+                }
+                
+                setTimeout(processChunk, 50);
+            }
+
+            function finishMonteCarlo() {
+                const medianMaxDD = maxDrawdowns[Math.floor(NUM_SIMULATIONS / 2)];
+                const riskOfRuin = ((ruinedCount / NUM_SIMULATIONS) * 100).toFixed(1);
+                
+                document.getElementById('mcMaxDD').textContent = `-$${medianMaxDD.toFixed(2)}`;
+                const rorEl = document.getElementById('riskOfRuin');
+                rorEl.textContent = `${riskOfRuin}%`;
+                rorEl.className = 'stat-value ' + (parseFloat(riskOfRuin) > 10 ? 'negative' : (parseFloat(riskOfRuin) === 0 ? 'positive' : 'neutral'));
+                
+                // 3. Monte Carlo Paths Chart
+                if (mcPathsChartInstance) mcPathsChartInstance.destroy();
+                const pathDatasets = pathsToPlot.map((p, idx) => {
+                    const lastVal = p[p.length-1].y !== undefined ? p[p.length-1].y : p[p.length-1];
+                    return {
+                        label: `Sim ${idx+1}`,
+                        data: p,
+                        borderColor: lastVal >= 0 ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+                        borderWidth: 1.5,
+                        pointRadius: 0,
+                        fill: false,
+                        tension: 0
+                    };
+                });
+                
+                mcPathsChartInstance = new Chart(document.getElementById('mcPathsChart').getContext('2d'), {
+                    type: 'line',
+                    data: { datasets: pathDatasets }, // No global labels needed with x/y objects
+                    options: {
+                        responsive: true, maintainAspectRatio: false,
+                        animation: false, // Force no animation on render
+                        normalized: true, // Optimizes charting for large datasets
+                        parsing: false, // Now valid because we supply {x, y} objects directly
+                        plugins: { legend: { display: false }, tooltip: { enabled: false } },
+                        scales: {
+                            x: { display: false, type: 'linear', min: 0, max: NUM_TRADES },
+                            y: { title: { display: true, text: 'Equity P/L ($)' }, grid: { color: 'rgba(255,255,255,0.05)' } }
+                        }
+                    }
+                });
+                
+                if (pLoader) {
+                    pLoader.style.opacity = '0';
+                    setTimeout(() => pLoader.style.pointerEvents = 'none', 300);
+                }
+                
+                // Yield before drawing the next chart
+                setTimeout(drawDistChart, 15);
+            }
+
+            function drawDistChart() {
+                // 4. Monte Carlo Distribution Chart
+                const minProf = finalProfits[0];
+                const maxProf = finalProfits[NUM_SIMULATIONS - 1];
+                const binCount = Math.min(40, NUM_SIMULATIONS / 10);
+                const binRange = (maxProf - minProf) / binCount;
+                const bins = Array(binCount).fill(0);
+                
+                finalProfits.forEach(p => {
+                    let binIdx = Math.floor((p - minProf) / (binRange || 1));
+                    if (binIdx >= binCount) binIdx = binCount - 1;
+                    if (binIdx < 0) binIdx = 0;
+                    bins[binIdx]++;
+                });
+                
+                const binLabels = bins.map((_, i) => `$${(minProf + i * binRange).toFixed(0)}`);
+                const binColors = bins.map((_, i) => (minProf + i * binRange) >= 0 ? 'rgba(16, 185, 129, 0.8)' : 'rgba(239, 68, 68, 0.8)');
+                
+                if (mcDistChartInstance) mcDistChartInstance.destroy();
+                mcDistChartInstance = new Chart(document.getElementById('mcDistChart').getContext('2d'), {
+                    type: 'bar',
+                    data: {
+                        labels: binLabels,
+                        datasets: [{
+                            label: 'Simulations',
+                            data: bins,
+                            backgroundColor: binColors,
+                            borderRadius: 2,
+                            barPercentage: 1.0,
+                            categoryPercentage: 1.0
+                        }]
+                    },
+                    options: {
+                        responsive: true, maintainAspectRatio: false,
+                        animation: false, // Performance
+                        plugins: { legend: { display: false } },
+                        scales: {
+                            x: { title: { display: true, text: 'Final P/L Range' }, ticks: { maxTicksLimit: 15 }, grid: { display: false } },
+                            y: { title: { display: true, text: 'Number of Simulations' }, grid: { color: 'rgba(255,255,255,0.05)' } }
+                        }
+                    }
+                });
+                
+                if (dLoader) {
+                    dLoader.style.opacity = '0';
+                    setTimeout(() => dLoader.style.pointerEvents = 'none', 300);
+                }
+                
+                const btn = document.getElementById('refreshMcBtn');
+                if (btn) {
+                    btn.disabled = false;
+                    btn.innerHTML = '↻ Refresh';
+                }
+            }
+        }
 
         function renderCharts(trades, speedBuckets, durationData, hourBuckets, streakCounts, longProfit, shortProfit) {
             Chart.defaults.color = '#94a3b8';

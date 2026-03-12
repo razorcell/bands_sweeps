@@ -165,6 +165,8 @@ input bool                 Use_Fib38_Trending = true;        // [TOGGLE] Allow 3
 
 input string               __M1_Momentum__ = "=== 5d. M1 HH/LL Momentum Filter ===";
 input bool                 Use_M1_Momentum = true;        // [TOGGLE] Use M1 HH/LL Ratio Filter
+input bool                 M1_Mom_Include_Current = false; // [TOGGLE] Always include current forming candle in ratio calculation
+input bool                 M1_Mom_Include_If_Broken = true; // [TOGGLE] Override above to include current candle if it makes a new HH or LL
 input int                  M1_Mom_Lookback = 50;          // Bars to count HH and LL
 input double               M1_Mom_Trend_Threshold = 65.0; // Ratio % above = Trending (block counter)
 input double               M1_Mom_Range_Threshold = 55.0; // Ratio % between 100-X and X = Ranging state
@@ -172,6 +174,7 @@ input bool                 M1_Mom_Bypass_HTF      = false; // [TOGGLE] If Rangin
 input bool                 M1_Mom_Bypass_MTF      = false; // [TOGGLE] If Ranging, also bypass Medium Term TF (M5) rules
 input bool                 M1_Mom_Allow_Neutral   = true;  // [TOGGLE] If Neutral (between Ranging and Trending), allow entries (avoids strong momentum against)
 input bool                 M1_Mom_Bypass_Extreme  = true;  // [TOGGLE] Bypass M1 extreme condition when there is strong momentum and price is near band
+input bool                 M1_Mom_Bypass_ShowRect = false; // [TOGGLE] Draw rectangles for M1 momentum bypass
 input int                  M1_Mom_Bypass_Lookback = 5;     // Bars to look back for strong momentum for the extreme bypass
 input double               M1_Mom_Bypass_Near_Pct = 0.10;  // Allowed distance to M1 band for bypass (10% of full M1 band range)
 input int                  M1_Mom_Bypass_Prev_Bars = 5;    // Candles to measure BEFORE the big push onset
@@ -200,6 +203,10 @@ input bool                 Use_Normal_Sweep = true;          // [TOGGLE] Require
 input double               NormalSweep_ATR = 0.5;            // ATR Multiplier for normal sweep depth
 input bool                 Show_NormalSweep_Lines  = true;   // [TOGGLE] Show Normal Sweep requirement lines
 input bool                 Show_NormalSweep_Labels = true;   // [TOGGLE] Show Normal Sweep requirement labels
+input string               __Unretested__ = "=== 7c. Unretested Fractal Filter ===";
+input bool                 Use_Unretested_Fractal_Filter = true; // [TOGGLE] Ignore trades if broken fractal isn't retested
+input bool                 Show_Unretested_Visuals = true;       // [TOGGLE] Show broken fractal retest zones
+input double               Unretested_Min_ATR_Range = 1.5;       // Minimum ATR size for a valid fractal structural swing
 
 input string               __Clearance__ = "=== 8. Structural Clearance ===";
 input bool                 Use_Clearance_Filter = true; // [TOGGLE] Prevent buying into immediate resistance
@@ -263,6 +270,8 @@ input int                  H1_Visual_History = 48;
 input bool                 Show_Liquidity_Lines    = false; // [TOGGLE] Show horizontal liquidity lines on the chart
 input bool                 Show_LQ_Labels          = false; // [TOGGLE] Show text labels on liquidity lines (if lines are shown)
 input bool                 Show_Liquidity_Clusters = false; // [TOGGLE] Show liquidity clusters as colored zones
+input bool                 Disable_Chart_Visuals   = false; // [TOGGLE] Disable all chart visual objects
+input bool                 Disable_Dashboard_Panel = false; // [TOGGLE] Disable dashboard panel
 
 
 //--- Global Variables
@@ -333,6 +342,14 @@ datetime sweep_buy_bar = 0;
 datetime sweep_sell_bar = 0;
 bool d_extreme_buy, d_extreme_sell;
 bool d_sqz_m1, d_sqz_m5, d_sqz_h1, is_squeeze;
+
+// Panel P/L Cache Variables
+datetime last_pl_calc_time = 0;
+double cached_daily_net = 0;
+double cached_prev_net = 0;
+double cached_five_net = 0;
+double cached_mtd_net = 0;
+int cached_positions_total = -1;
 
 bool d_is_news_time = false;
 int d_h1_trend = 0; 
@@ -416,6 +433,16 @@ SLiquidity active_resistances[];
 
 struct STempLiquidity { double price; datetime time; int bar_index; bool is_major; bool is_eq; bool req_deep; int break_idx; bool flip_broken; };
 
+//--- Unretested Fractal Trackers
+bool d_retest_buy_ok = true;
+bool d_retest_sell_ok = true;
+
+double d_ur_recent_top = 0, d_ur_recent_bot = 0;
+datetime d_ur_recent_top_t = 0, d_ur_recent_bot_t = 0;
+
+double d_ur_prev_top = 0, d_ur_prev_bot = 0;
+datetime d_ur_prev_top_t = 0, d_ur_prev_bot_t = 0;
+
 //+------------------------------------------------------------------+
 //| Helper Function: Check Trading Hours                             |
 //+------------------------------------------------------------------+
@@ -478,7 +505,16 @@ bool IsSpeedAllowed(double speed, string ranges_str) {
 int GetHistoricalM1MomTrend(int bar_index) {
     if(!Use_M1_Momentum) return 0;
     int hh_count = 0; int ll_count = 0;
-    for(int k = 0; k < M1_Mom_Lookback; k++) {
+    int start_k = 1;
+    if (M1_Mom_Include_Current) {
+        start_k = 0;
+    } else if (M1_Mom_Include_If_Broken) {
+        if (iHigh(_Symbol, _Period, bar_index) > iHigh(_Symbol, _Period, bar_index + 1) || 
+            iLow(_Symbol, _Period, bar_index) < iLow(_Symbol, _Period, bar_index + 1)) {
+            start_k = 0;
+        }
+    }
+    for(int k = start_k; k < M1_Mom_Lookback + start_k; k++) {
         if(iHigh(_Symbol, _Period, bar_index + k) > iHigh(_Symbol, _Period, bar_index + k + 1)) hh_count++;
         if(iLow(_Symbol, _Period, bar_index + k) < iLow(_Symbol, _Period, bar_index + k + 1)) ll_count++;
     }
@@ -533,7 +569,13 @@ void OnTick() {
     if(!UpdateIndicatorBuffers()) return;
 
     ScanInternalLiquidity(); 
-    UpdateVisuals();         
+    
+    bool do_visuals = !Disable_Chart_Visuals;
+    bool do_panel   = Show_Panel && !Disable_Dashboard_Panel;
+
+    if (do_visuals) {
+        UpdateVisuals();         
+    }
     EvaluateDashboardStates();
 
     int open_positions = CountOpenPositions();
@@ -547,7 +589,7 @@ void OnTick() {
         CheckEntry();
     }
 
-    if(Show_Panel) DrawDashboard();
+    if(do_panel) DrawDashboard();
 }
 
 int CountOpenPositions() {
@@ -978,6 +1020,9 @@ void EvaluateDashboardStates() {
     // --- 1. News ---
     d_is_news_time = IsNewsTime();
     bool is_eod_restricted = IsEndOfDayRestricted();
+    
+    // Check structural unretested fractals
+    EvaluateUnretestedFractals();
 
     // Evaluate Ranging State
     d_is_ranging = false;
@@ -995,7 +1040,16 @@ void EvaluateDashboardStates() {
     if(Use_M1_Momentum) {
         int hh_count = 0;
         int ll_count = 0;
-        for(int k = 0; k < M1_Mom_Lookback; k++) {
+        int start_k = 1;
+        if (M1_Mom_Include_Current) {
+            start_k = 0;
+        } else if (M1_Mom_Include_If_Broken) {
+            if (iHigh(_Symbol, _Period, 0) > iHigh(_Symbol, _Period, 1) || 
+                iLow(_Symbol, _Period, 0) < iLow(_Symbol, _Period, 1)) {
+                start_k = 0;
+            }
+        }
+        for(int k = start_k; k < M1_Mom_Lookback + start_k; k++) {
             if(iHigh(_Symbol, _Period, k) > iHigh(_Symbol, _Period, k+1)) hh_count++;
             if(iLow(_Symbol, _Period, k) < iLow(_Symbol, _Period, k+1)) ll_count++;
         }
@@ -1498,25 +1552,35 @@ double GetHistoryProfitByShift(int start_shift, int end_shift, ENUM_TIMEFRAMES t
 }
 
 void DrawDashboard() {
+    datetime current_time = TimeCurrent();
+    int current_positions = PositionsTotal();
+    
+    if(current_time - last_pl_calc_time >= 60 || current_positions != cached_positions_total) {
+        cached_daily_net = GetHistoryProfitByShift(0, 0);
+        cached_prev_net  = GetHistoryProfitByShift(1, 1);
+        cached_five_net  = GetHistoryProfitByShift(4, 0);
+        cached_mtd_net   = GetHistoryProfitByShift(0, 0, PERIOD_MN1);
+        last_pl_calc_time = current_time;
+        cached_positions_total = current_positions;
+    }
+
     int x = 20, y = 20, gap = 18; color c_buy = clrGreen, c_sell = clrRed, c_wait = clrDimGray, c_text = clrBlack;
 
-    double daily_net = GetHistoryProfitByShift(0, 0);
-    string net_str = StringFormat("[ Net D1: %.2f ]", daily_net);
-    color net_col = (daily_net > 0) ? clrGreen : ((daily_net < 0) ? clrRed : clrGray);
+    string net_str = StringFormat("[ Net D1: %.2f ]", cached_daily_net);
+    color net_col = (cached_daily_net > 0) ? clrGreen : ((cached_daily_net < 0) ? clrRed : clrGray);
 
     y+=gap;
-    MqlDateTime dt_gmt;
+    MqlDateTime dt_gmt, dt_server;
     TimeGMT(dt_gmt);
+    TimeCurrent(dt_server);
     string gmt_str = StringFormat("%02d:%02d", dt_gmt.hour, dt_gmt.min);
-    DrawLabel("dash_title", StringFormat("[ Bands Sweeper v2.1 | GMT %s ]", gmt_str), x + 150, y, clrBlue);
+    string server_str = StringFormat("%02d:%02d", dt_server.hour, dt_server.min);
+    DrawLabel("dash_title", StringFormat("[ Bands Sweeper v2.1 | GMT: %s / Server: %s ]", gmt_str, server_str), x + 150, y, clrBlue);
     DrawLabel("dash_daily_net", net_str, x, y, net_col);
     
     y+=gap;
-    double prev_net = GetHistoryProfitByShift(1, 1);
-    double five_net = GetHistoryProfitByShift(4, 0);
-    double mtd_net  = GetHistoryProfitByShift(0, 0, PERIOD_MN1);
-    string hist_str = StringFormat("[ Prev D1: %.2f | Last 5 Days: %.2f | MTD: %.2f ]", prev_net, five_net, mtd_net);
-    color hist_col = (mtd_net > 0) ? clrGreen : ((mtd_net < 0) ? clrRed : clrGray);
+    string hist_str = StringFormat("[ Prev D1: %.2f | Last 5 Days: %.2f | MTD: %.2f ]", cached_prev_net, cached_five_net, cached_mtd_net);
+    color hist_col = (cached_mtd_net > 0) ? clrGreen : ((cached_mtd_net < 0) ? clrRed : clrGray);
     DrawLabel("dash_hist_net", hist_str, x, y, hist_col);
     
     // ==========================================
@@ -1541,7 +1605,24 @@ void DrawDashboard() {
     }
 
     if(Use_News_Filter) DrawLabel("dash_chk_news", "[1] News Filter: " + (d_is_news_time ? "PAUSED (High Impact)" : "CLEAR"), x, y+=gap, d_is_news_time ? clrRed : clrGreen);
-    if(Use_EOD_Filter) DrawLabel("dash_chk_eod", "[1a] EOD Filter: " + (IsEndOfDayRestricted() ? "PAUSED (Near Daily Close)" : "CLEAR"), x, y+=gap, IsEndOfDayRestricted() ? clrRed : clrGreen);
+    string eod_hrs_txt = "";
+    color eod_hrs_col = clrGreen;
+    if (Use_EOD_Filter) {
+        eod_hrs_txt = "[1a] EOD Filter: " + (IsEndOfDayRestricted() ? "PAUSED (Near Daily Close)" : "CLEAR");
+        if (IsEndOfDayRestricted()) eod_hrs_col = clrRed;
+    }
+    if (Use_Trading_Hours) {
+        MqlDateTime dt_cur;
+        TimeCurrent(dt_cur);
+        bool is_blocked = IsTradingHourBlocked();
+        string blk_txt = "Blocked Hrs: " + (is_blocked ? StringFormat("PAUSED (Hour %02d)", dt_cur.hour) : "CLEAR");
+        if (eod_hrs_txt == "") eod_hrs_txt = "[1a] " + blk_txt;
+        else eod_hrs_txt += " | " + blk_txt;
+        if (is_blocked) eod_hrs_col = clrRed;
+    }
+    if (eod_hrs_txt != "") {
+        DrawLabel("dash_chk_eod", eod_hrs_txt, x, y+=gap, eod_hrs_col);
+    }
     
     string htf2_str = StringSubstr(EnumToString(InpHTF2), 7);
     bool is_h1_bypassed = (d_is_ranging && ADX_Range_Bypass_H1);
@@ -1614,6 +1695,14 @@ void DrawDashboard() {
     string tf_str = StringSubstr(EnumToString(_Period), 7);
     DrawLabel("dash_chk_ext", "[7] " + tf_str + " Extreme: " + ext_txt, x, y+=gap, ext_col);
     
+    if(Use_Unretested_Fractal_Filter) {
+        string ret_txt = "WAITING"; color ret_col = c_wait;
+        if(d_retest_buy_ok && d_retest_sell_ok) { ret_txt = "BUY & SELL OK"; ret_col = clrGreen; }
+        else if(d_retest_buy_ok) { ret_txt = "BUY OK (Sell Blocked)"; ret_col = c_buy; }
+        else if(d_retest_sell_ok) { ret_txt = "SELL OK (Buy Blocked)"; ret_col = c_sell; }
+        else { ret_txt = "ALL BLOCKED"; ret_col = clrRed; }
+        DrawLabel("dash_chk_retest", "[7c] Struct Retest: " + ret_txt, x, y+=gap, ret_col);
+    }
 
     double rt_pips = (iClose(_Symbol, _Period, 0) - iOpen(_Symbol, _Period, 0)) / _Point; 
     long rt_sec = TimeCurrent() - iTime(_Symbol, _Period, 0);
@@ -2033,6 +2122,91 @@ void DrawLabel(string name, string text, int x, int y, color col) {
 }
 
 //+------------------------------------------------------------------+
+//+------------------------------------------------------------------+
+//| Unretested Fractal Filter (Evaluated in Dashboard States)        |
+//| Fix: The retest must be done by comparing the internal ranges    |
+//|      of the two most recent structural swings. If the recent     |
+//|      swing range touches the previous swing range, it is considered|
+//|      retested (momentum is consolidating). If there is a clean     |
+//|      gap between them, momentum is too strong (un-retested).     |
+//| Fix 2: Dynamically accumulate fractals until the swing range     |
+//|      reaches a minimum size (ATR based) to filter out flat noise.|
+//+------------------------------------------------------------------+
+void EvaluateUnretestedFractals() {
+    d_retest_buy_ok = true;     
+    d_retest_sell_ok = true;
+    d_ur_recent_top = 0; d_ur_recent_bot = 0; d_ur_recent_top_t = 0; d_ur_recent_bot_t = 0;
+    d_ur_prev_top = 0; d_ur_prev_bot = 0; d_ur_prev_top_t = 0; d_ur_prev_bot_t = 0;
+    
+    if(!Use_Unretested_Fractal_Filter) return;
+    if(ArraySize(atr_m1) == 0 || atr_m1[0] <= 0) return;
+    
+    int limit = 400; // Increased limit because we may need to scan further to build large ranges
+    double min_range_sz = atr_m1[0] * Unretested_Min_ATR_Range;
+    
+    double r_top[2] = {0, 0};
+    double r_bot[2] = {0, 0};
+    datetime r_top_t[2] = {0, 0};
+    datetime r_bot_t[2] = {0, 0};
+    int r_count = 0;
+    
+    double cur_top = 0, cur_bot = 0;
+    datetime cur_top_t = 0, cur_bot_t = 0;
+    bool has_top = false, has_bot = false;
+
+    // Dynamically build minimum-size structural swings
+    for(int i=2; i<limit && r_count < 2; i++) {
+        if(IsTopFractal(i)) {
+            double h = iHigh(_Symbol, _Period, i);
+            if(!has_top || h > cur_top) {
+                cur_top = h; cur_top_t = iTime(_Symbol, _Period, i); has_top = true;
+            }
+        }
+        if(IsBottomFractal(i)) {
+            double l = iLow(_Symbol, _Period, i);
+            if(!has_bot || l < cur_bot) {
+                cur_bot = l; cur_bot_t = iTime(_Symbol, _Period, i); has_bot = true;
+            }
+        }
+        
+        if(has_top && has_bot) {
+            // Did this expanding range finally reach our minimum structural size requirement?
+            if((cur_top - cur_bot) >= min_range_sz) {
+                r_top[r_count] = cur_top; r_top_t[r_count] = cur_top_t;
+                r_bot[r_count] = cur_bot; r_bot_t[r_count] = cur_bot_t;
+                r_count++;
+                
+                // Reset to begin looking for the NEXT separate swing range backwards
+                has_top = false; has_bot = false; cur_top = 0; cur_bot = 0;
+            }
+        }
+    }
+    
+    if(r_count == 2) {
+        d_ur_recent_top = r_top[0]; d_ur_recent_top_t = r_top_t[0];
+        d_ur_recent_bot = r_bot[0]; d_ur_recent_bot_t = r_bot_t[0];
+        
+        d_ur_prev_top = r_top[1];   d_ur_prev_top_t = r_top_t[1];
+        d_ur_prev_bot = r_bot[1];   d_ur_prev_bot_t = r_bot_t[1];
+        
+        // Two ranges overlap if: (r1_max >= r2_min) AND (r1_min <= r2_max)
+        bool is_overlapping = (d_ur_recent_top >= d_ur_prev_bot && d_ur_recent_bot <= d_ur_prev_top);
+        
+        if(!is_overlapping) {
+            // There is a GAP between the recent swing and the previous swing.
+            if(d_ur_recent_top < d_ur_prev_bot) {
+                // Downtrend Gap -> Strong downward momentum -> Block Buys
+                d_retest_buy_ok = false;
+            }
+            if(d_ur_recent_bot > d_ur_prev_top) {
+                // Uptrend Gap -> Strong upward momentum -> Block Sells
+                d_retest_sell_ok = false;
+            }
+        }
+    }
+}
+
+//+------------------------------------------------------------------+
 //| ENTRY LOGIC                                                      |
 //+------------------------------------------------------------------+
 void CheckEntry() {
@@ -2084,8 +2258,8 @@ void CheckEntry() {
     bool fib50_buy_ok = Use_Fib50_Filter ? (bid < d_fib_active_buy) : true;
     bool fib50_sell_ok = Use_Fib50_Filter ? (ask > d_fib_active_sell) : true;
     
-    bool valid_buy_setup = (!d_is_news_time && !is_eod && !is_hour_blocked && h1_buy_ok && m5_buy_ok && fib50_buy_ok && d_clear_buy && d_sweep_buy && d_extreme_buy);
-    bool valid_sell_setup = (!d_is_news_time && !is_eod && !is_hour_blocked && h1_sell_ok && m5_sell_ok && fib50_sell_ok && d_clear_sell && d_sweep_sell && d_extreme_sell);
+    bool valid_buy_setup = (!d_is_news_time && !is_eod && !is_hour_blocked && h1_buy_ok && m5_buy_ok && fib50_buy_ok && d_clear_buy && d_sweep_buy && d_extreme_buy && d_retest_buy_ok);
+    bool valid_sell_setup = (!d_is_news_time && !is_eod && !is_hour_blocked && h1_sell_ok && m5_sell_ok && fib50_sell_ok && d_clear_sell && d_sweep_sell && d_extreme_sell && d_retest_sell_ok);
 
     if(Use_M1_Momentum) {
         if(d_m1_mom_trend == 1) { // Up momentum, block shorts
@@ -2508,6 +2682,50 @@ void UpdateVisuals() {
     
     // NEW: Draw M1 Bypass Zones
     DrawM1BypassZones();
+    
+    // NEW: Draw Unretested Fractal Zones
+    DrawUnretestedVisuals();
+}
+
+//+------------------------------------------------------------------+
+//| Unretested Fractal Filter Visuals                                |
+//+------------------------------------------------------------------+
+void DrawUnretestedVisuals() {
+    ObjectDelete(0, "vis_ur_recent");
+    ObjectDelete(0, "vis_ur_prev");
+    
+    if(!Use_Unretested_Fractal_Filter || !Show_Unretested_Visuals) return;
+    
+    datetime current_time = iTime(_Symbol, _Period, 0);
+
+    if(d_ur_recent_top_t > 0 && d_ur_recent_bot_t > 0 && d_ur_prev_top_t > 0 && d_ur_prev_bot_t > 0) {
+        // Determine coloring based on the gap state
+        bool is_overlapping = (d_ur_recent_top >= d_ur_prev_bot && d_ur_recent_bot <= d_ur_prev_top);
+        color box_col = is_overlapping ? clrDarkSlateGray : clrCrimson; 
+        
+        // RECENT RANGE RECTANGLE
+        datetime rec_t1 = MathMin(d_ur_recent_top_t, d_ur_recent_bot_t);
+        if(ObjectFind(0, "vis_ur_recent") < 0) ObjectCreate(0, "vis_ur_recent", OBJ_RECTANGLE, 0, 0, 0, 0, 0);
+        ObjectSetInteger(0, "vis_ur_recent", OBJPROP_TIME, 0, rec_t1);
+        ObjectSetDouble(0, "vis_ur_recent", OBJPROP_PRICE, 0, d_ur_recent_top);
+        ObjectSetInteger(0, "vis_ur_recent", OBJPROP_TIME, 1, current_time);
+        ObjectSetDouble(0, "vis_ur_recent", OBJPROP_PRICE, 1, d_ur_recent_bot);
+        ObjectSetInteger(0, "vis_ur_recent", OBJPROP_COLOR, box_col);
+        ObjectSetInteger(0, "vis_ur_recent", OBJPROP_FILL, true);
+        ObjectSetInteger(0, "vis_ur_recent", OBJPROP_BACK, true);
+        
+        // PREVIOUS RANGE RECTANGLE
+        datetime prev_t1 = MathMin(d_ur_prev_top_t, d_ur_prev_bot_t);
+        datetime prev_t2 = rec_t1; // Stretch it to meet the recent rectangle
+        if(ObjectFind(0, "vis_ur_prev") < 0) ObjectCreate(0, "vis_ur_prev", OBJ_RECTANGLE, 0, 0, 0, 0, 0);
+        ObjectSetInteger(0, "vis_ur_prev", OBJPROP_TIME, 0, prev_t1);
+        ObjectSetDouble(0, "vis_ur_prev", OBJPROP_PRICE, 0, d_ur_prev_top);
+        ObjectSetInteger(0, "vis_ur_prev", OBJPROP_TIME, 1, prev_t2);
+        ObjectSetDouble(0, "vis_ur_prev", OBJPROP_PRICE, 1, d_ur_prev_bot);
+        ObjectSetInteger(0, "vis_ur_prev", OBJPROP_COLOR, box_col);
+        ObjectSetInteger(0, "vis_ur_prev", OBJPROP_FILL, true);
+        ObjectSetInteger(0, "vis_ur_prev", OBJPROP_BACK, true);
+    }
 }
 
 //+------------------------------------------------------------------+
@@ -2621,7 +2839,16 @@ void DrawM1MomentumPoints() {
         // Calculate historical HH/LL ratio for bar i
         int hh_count = 0;
         int ll_count = 0;
-        for(int k = 0; k < M1_Mom_Lookback; k++) {
+        int start_k = 1;
+        if (M1_Mom_Include_Current) {
+            start_k = 0;
+        } else if (M1_Mom_Include_If_Broken) {
+            if (iHigh(_Symbol, _Period, i) > iHigh(_Symbol, _Period, i + 1) || 
+                iLow(_Symbol, _Period, i) < iLow(_Symbol, _Period, i + 1)) {
+                start_k = 0;
+            }
+        }
+        for(int k = start_k; k < M1_Mom_Lookback + start_k; k++) {
             if(iHigh(_Symbol, _Period, i + k) > iHigh(_Symbol, _Period, i + k + 1)) hh_count++;
             if(iLow(_Symbol, _Period, i + k) < iLow(_Symbol, _Period, i + k + 1)) ll_count++;
         }
@@ -2692,7 +2919,7 @@ void DrawM1BypassZones() {
     string push_zone_name = "vis_mb_push";
     string prev_zone_name = "vis_mb_prev";
     
-    if(!M1_Mom_Bypass_Extreme || g_mb_start_idx == -1) {
+    if(!M1_Mom_Bypass_Extreme || !M1_Mom_Bypass_ShowRect || g_mb_start_idx == -1) {
         ObjectDelete(0, push_zone_name);
         ObjectDelete(0, prev_zone_name);
         return;

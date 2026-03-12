@@ -269,6 +269,19 @@
         tr:hover {
             background: rgba(255,255,255,0.02);
         }
+        .history-panel {
+            background: var(--panel-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 1rem 1.5rem;
+            backdrop-filter: var(--glass-blur);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 1rem;
+            margin-top: -1rem;
+        }
+
         .info-alert {
             background: rgba(59, 130, 246, 0.1);
             border-left: 4px solid var(--accent);
@@ -308,6 +321,13 @@
                 <input type="file" id="fileInput" accept=".xml">
             </div>
             <div style="margin-left: 20px; color: var(--text-muted);" id="upload-status">Awaiting optimization xml file...</div>
+        </div>
+
+        <div class="history-panel" id="history-panel" style="display: none;">
+            <label style="color: var(--text-muted); font-weight: 600;">History:</label>
+            <select id="historySelect" style="max-width: 400px; flex: 1;"></select>
+            <button class="btn" style="padding: 0.5rem 1.5rem;" onclick="loadFromHistory()">Load</button>
+            <button class="btn" style="padding: 0.5rem 1.5rem; background-color: var(--danger);" onclick="deleteFromHistory()">Delete</button>
         </div>
 
         <div class="tabs" id="tabs-container" style="display: none;">
@@ -443,6 +463,122 @@
             }
         }
 
+        const MAX_HISTORY = 5;
+
+        function saveToHistory(fileName, xmlText) {
+            let history = [];
+            try {
+                history = JSON.parse(localStorage.getItem('opt_history_index')) || [];
+            } catch(e) {}
+
+            const id = Date.now().toString();
+            const entry = { id, name: fileName, timestamp: new Date().toLocaleString() };
+
+            history.unshift(entry);
+            
+            while (history.length > MAX_HISTORY) {
+                const removed = history.pop();
+                localStorage.removeItem(`opt_data_${removed.id}`);
+            }
+            
+            let saved = false;
+            while (!saved && history.length > 0) {
+                try {
+                    localStorage.setItem(`opt_data_${id}`, xmlText);
+                    localStorage.setItem('opt_history_index', JSON.stringify(history));
+                    localStorage.setItem('last_opened_opt_id', id);
+                    saved = true;
+                } catch (e) {
+                    console.warn("Storage quota exceeded, removing oldest history item...", e);
+                    const removed = history.pop();
+                    localStorage.removeItem(`opt_data_${removed.id}`);
+                    if (history.length === 0) {
+                        console.error("Could not save even after clearing history.");
+                    }
+                }
+            }
+            updateHistoryUI();
+        }
+
+        function updateHistoryUI() {
+            let history = [];
+            try {
+                history = JSON.parse(localStorage.getItem('opt_history_index')) || [];
+            } catch(e) {}
+
+            const panel = document.getElementById('history-panel');
+            const select = document.getElementById('historySelect');
+            
+            if (history.length > 0) {
+                panel.style.display = 'flex';
+                select.innerHTML = '';
+                history.forEach(item => {
+                    select.innerHTML += `<option value="${item.id}">${item.name} (${item.timestamp})</option>`;
+                });
+                
+                const lastId = localStorage.getItem('last_opened_opt_id');
+                if (lastId) {
+                    select.value = lastId;
+                }
+            } else {
+                panel.style.display = 'none';
+                select.innerHTML = '';
+            }
+        }
+
+        function loadFromHistory() {
+            const select = document.getElementById('historySelect');
+            const id = select.value;
+            if (!id) return;
+            
+            const xmlText = localStorage.getItem(`opt_data_${id}`);
+            if (xmlText) {
+                document.getElementById('upload-status').textContent = 'Loading from history...';
+                try {
+                    parseXML(xmlText);
+                    
+                    let history = [];
+                    try { history = JSON.parse(localStorage.getItem('opt_history_index')) || []; } catch(e) {}
+                    const item = history.find(h => h.id === id);
+                    const name = item ? item.name : 'history';
+                    
+                    localStorage.setItem('last_opened_opt_id', id);
+
+                    document.getElementById('upload-status').innerHTML = `<span style="color:var(--success);">Loaded ${globalData.length} passes successfully from ${name}.</span>`;
+                    document.getElementById('tabs-container').style.display = 'flex';
+                    
+                    document.querySelector('.tab-btn.active').click();
+                    
+                    setupUI();
+                    updateDashboard();
+                } catch (err) {
+                    console.error("Error parsing saved file", err);
+                    document.getElementById('upload-status').innerHTML = `<span style="color:var(--danger);">Error loading file from history.</span>`;
+                }
+            } else {
+                document.getElementById('upload-status').innerHTML = `<span style="color:var(--danger);">Report data not found in local storage.</span>`;
+            }
+        }
+
+        function deleteFromHistory() {
+            const select = document.getElementById('historySelect');
+            const id = select.value;
+            if (!id) return;
+            
+            let history = [];
+            try { history = JSON.parse(localStorage.getItem('opt_history_index')) || []; } catch(e) {}
+            
+            history = history.filter(h => h.id !== id);
+            localStorage.setItem('opt_history_index', JSON.stringify(history));
+            localStorage.removeItem(`opt_data_${id}`);
+            
+            if (localStorage.getItem('last_opened_opt_id') === id) {
+                localStorage.removeItem('last_opened_opt_id');
+            }
+            
+            updateHistoryUI();
+        }
+
         async function handleFile(event) {
             const file = event.target.files[0];
             if (!file) return;
@@ -452,6 +588,9 @@
             try {
                 const text = await file.text();
                 parseXML(text);
+                
+                saveToHistory(file.name, text);
+
                 document.getElementById('upload-status').innerHTML = `<span style="color:var(--success);">Loaded ${globalData.length} passes successfully.</span>`;
                 document.getElementById('tabs-container').style.display = 'flex';
                 
@@ -465,6 +604,20 @@
                 document.getElementById('upload-status').innerHTML = `<span style="color:var(--danger);">Error parsing file: ${err.message}</span>`;
             }
         }
+
+        window.addEventListener('DOMContentLoaded', () => {
+            // Cleanup old logic
+            localStorage.removeItem('lastOptimizationXML');
+            localStorage.removeItem('lastOptimizationFileName');
+
+            updateHistoryUI();
+            const lastId = localStorage.getItem('last_opened_opt_id');
+            if (lastId && localStorage.getItem(`opt_data_${lastId}`)) {
+                const select = document.getElementById('historySelect');
+                if (select) select.value = lastId;
+                loadFromHistory();
+            }
+        });
 
         function parseXML(xmlString) {
             const parser = new DOMParser();

@@ -493,6 +493,7 @@
             <button class="tab-btn" onclick="switchTab('sequence-tab')">Sequence & Direction Edge</button>
             <button class="tab-btn" onclick="switchTab('calendar-tab')">Calendar View</button>
             <button class="tab-btn" onclick="switchTab('quant-tab')">Quantitative Edge</button>
+            <button class="tab-btn" onclick="switchTab('monthly-tab')">📅 Monthly P/L</button>
         </div>
 
         <div id="speed-tab" class="tab-content active">
@@ -714,6 +715,55 @@
                             <div class="loader-ring"></div>
                         </div>
                     </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- MONTHLY P/L TAB -->
+        <div id="monthly-tab" class="tab-content">
+            <div class="stats-grid" id="monthly-stats">
+                <div class="stat-card">
+                    <div class="stat-title">Best Month</div>
+                    <div class="stat-value positive" id="bestMonth">-</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-title">Worst Month</div>
+                    <div class="stat-value negative" id="worstMonth">-</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-title">Avg Monthly P/L</div>
+                    <div class="stat-value" id="avgMonthlyPL">-</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-title">Profitable Months</div>
+                    <div class="stat-value" id="profitableMonths">-</div>
+                </div>
+            </div>
+
+            <!-- Monthly Net Profit bar chart -->
+            <div class="chart-box">
+                <h3 style="margin-top:0;">Monthly Net Profit Distribution</h3>
+                <p style="font-size: 0.75rem; color: var(--text-muted); margin-top: -5px; margin-bottom: 10px;">Click a bar to view individual trades for that month</p>
+                <div style="position: relative; height: 380px;">
+                    <canvas id="monthlyPLBarChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Monthly Win/Loss count stacked bar -->
+            <div class="chart-box">
+                <h3 style="margin-top:0;">Monthly Win / Loss Trade Count</h3>
+                <p style="font-size: 0.75rem; color: var(--text-muted); margin-top: -5px; margin-bottom: 10px;">Stacked count of winning vs losing trades per month</p>
+                <div style="position: relative; height: 300px;">
+                    <canvas id="monthlyWLBarChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Monthly Win Rate line chart -->
+            <div class="chart-box">
+                <h3 style="margin-top:0;">Monthly Win Rate (%)</h3>
+                <p style="font-size: 0.75rem; color: var(--text-muted); margin-top: -5px; margin-bottom: 10px;">Percentage of winning trades per month, with overall average dashed line</p>
+                <div style="position: relative; height: 280px;">
+                    <canvas id="monthlyWinRateChart"></canvas>
                 </div>
             </div>
         </div>
@@ -1431,6 +1481,7 @@
             renderCharts(trades, speedBuckets, durationData, hourBuckets, streakCounts, longProfit, shortProfit);
             renderCalendar(trades);
             renderQuant(trades);
+            renderMonthly(trades);
         }
 
         let durationScatterChartInstance = null;
@@ -1439,6 +1490,9 @@
         let streakBarChartInstance = null;
         let mcPathsChartInstance = null;
         let mcDistChartInstance = null;
+        let monthlyPLBarChartInstance = null;
+        let monthlyWLBarChartInstance = null;
+        let monthlyWinRateChartInstance = null;
 
         function renderQuant(trades) {
             if (!trades || trades.length === 0) return;
@@ -2214,6 +2268,240 @@
                 options: {
                     responsive: true, maintainAspectRatio: false,
                     scales: { y: { grid: { color: 'rgba(255,255,255,0.05)' } }, x: { grid: { display: false } } }
+                }
+            });
+        }
+
+        function renderMonthly(trades) {
+            if (!trades || trades.length === 0) return;
+
+            // Build monthly buckets from exit_time
+            const monthlyData = {};
+
+            trades.forEach(t => {
+                if (!t.exit_time || t.exit_time === '-') return;
+                const match = t.exit_time.match(/^(\d{4})\.(\d{2})/);
+                if (match) {
+                    const key = `${match[1]}-${match[2]}`; // YYYY-MM
+                    if (!monthlyData[key]) {
+                        monthlyData[key] = { profit: 0, wins: 0, losses: 0, trades: [] };
+                    }
+                    monthlyData[key].profit += t.profit;
+                    if (t.profit > 0) monthlyData[key].wins++;
+                    else monthlyData[key].losses++;
+                    monthlyData[key].trades.push(t);
+                }
+            });
+
+            const sortedKeys = Object.keys(monthlyData).sort();
+            if (sortedKeys.length === 0) return;
+
+            const monthNamesShort = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+            const labels = sortedKeys.map(k => {
+                const [yr, mo] = k.split('-');
+                return `${monthNamesShort[parseInt(mo)-1]} ${yr}`;
+            });
+
+            const profits = sortedKeys.map(k => monthlyData[k].profit);
+            const wins    = sortedKeys.map(k => monthlyData[k].wins);
+            const losses  = sortedKeys.map(k => monthlyData[k].losses);
+            const winRates = sortedKeys.map(k => {
+                const d = monthlyData[k];
+                const total = d.wins + d.losses;
+                return total > 0 ? +((d.wins / total) * 100).toFixed(1) : 0;
+            });
+            const allTrades = sortedKeys.map(k => monthlyData[k].trades);
+
+            // Summary stats
+            let bestMonthIdx = 0, worstMonthIdx = 0;
+            let totalPL = 0;
+            let profitableCount = 0;
+            profits.forEach((p, i) => {
+                if (p > profits[bestMonthIdx]) bestMonthIdx = i;
+                if (p < profits[worstMonthIdx]) worstMonthIdx = i;
+                totalPL += p;
+                if (p > 0) profitableCount++;
+            });
+            const avgPL = totalPL / profits.length;
+
+            const bestEl = document.getElementById('bestMonth');
+            if (bestEl) {
+                bestEl.textContent = `${labels[bestMonthIdx]}: +$${profits[bestMonthIdx].toFixed(2)}`;
+                bestEl.className = 'stat-value positive';
+            }
+            const worstEl = document.getElementById('worstMonth');
+            if (worstEl) {
+                worstEl.textContent = `${labels[worstMonthIdx]}: -$${Math.abs(profits[worstMonthIdx]).toFixed(2)}`;
+                worstEl.className = 'stat-value negative';
+            }
+            const avgEl = document.getElementById('avgMonthlyPL');
+            if (avgEl) {
+                avgEl.textContent = `${avgPL >= 0 ? '+' : ''}$${avgPL.toFixed(2)}`;
+                avgEl.className = 'stat-value ' + (avgPL >= 0 ? 'positive' : 'negative');
+            }
+            const pmEl = document.getElementById('profitableMonths');
+            if (pmEl) {
+                pmEl.textContent = `${profitableCount} / ${profits.length}`;
+                pmEl.className = 'stat-value ' + (profitableCount > profits.length / 2 ? 'positive' : 'negative');
+            }
+
+            Chart.defaults.color = '#94a3b8';
+            Chart.defaults.font.family = 'Inter';
+
+            // --- Chart 1: Monthly Net Profit bar ---
+            const barColors = profits.map(p => p >= 0 ? 'rgba(16, 185, 129, 0.82)' : 'rgba(239, 68, 68, 0.82)');
+            const borderColors = profits.map(p => p >= 0 ? 'rgba(16, 185, 129, 1)' : 'rgba(239, 68, 68, 1)');
+
+            if (monthlyPLBarChartInstance) monthlyPLBarChartInstance.destroy();
+            monthlyPLBarChartInstance = new Chart(document.getElementById('monthlyPLBarChart').getContext('2d'), {
+                type: 'bar',
+                data: {
+                    labels,
+                    datasets: [{
+                        label: 'Net Profit',
+                        data: profits,
+                        backgroundColor: barColors,
+                        borderColor: borderColors,
+                        borderWidth: 1,
+                        borderRadius: 5,
+                        tradesData: allTrades
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    onHover: (event, chartElement) => {
+                        event.native.target.style.cursor = chartElement.length ? 'pointer' : 'default';
+                    },
+                    onClick: (event, activeElements) => {
+                        if (activeElements.length > 0) {
+                            const idx = activeElements[0].index;
+                            const monthLabel = labels[idx];
+                            const monthTrades = allTrades[idx];
+                            if (monthTrades && monthTrades.length > 0) {
+                                showBucketDetails(monthLabel, monthTrades, 'Month');
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: ctx => {
+                                    const p = ctx.raw;
+                                    const d = monthlyData[sortedKeys[ctx.dataIndex]];
+                                    return [
+                                        `Net: ${p >= 0 ? '+' : ''}$${p.toFixed(2)}`,
+                                        `Trades: ${d.wins + d.losses}  |  ${d.wins}W / ${d.losses}L`
+                                    ];
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: { grid: { display: false } },
+                        y: {
+                            title: { display: true, text: 'Net Profit ($)' },
+                            grid: { color: 'rgba(255,255,255,0.05)' },
+                            afterFit: axis => { axis.width = 65; }
+                        }
+                    }
+                }
+            });
+
+            // --- Chart 2: Monthly W/L stacked bar ---
+            if (monthlyWLBarChartInstance) monthlyWLBarChartInstance.destroy();
+            monthlyWLBarChartInstance = new Chart(document.getElementById('monthlyWLBarChart').getContext('2d'), {
+                type: 'bar',
+                data: {
+                    labels,
+                    datasets: [
+                        {
+                            label: 'Wins',
+                            data: wins,
+                            backgroundColor: 'rgba(16, 185, 129, 0.75)',
+                            borderRadius: { topLeft: 4, topRight: 4 }
+                        },
+                        {
+                            label: 'Losses',
+                            data: losses,
+                            backgroundColor: 'rgba(239, 68, 68, 0.75)',
+                            borderRadius: { topLeft: 4, topRight: 4 }
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        tooltip: {
+                            callbacks: {
+                                label: ctx => `${ctx.dataset.label}: ${ctx.raw}`
+                            }
+                        }
+                    },
+                    scales: {
+                        x: { stacked: true, grid: { display: false } },
+                        y: {
+                            stacked: true,
+                            title: { display: true, text: 'Trade Count' },
+                            grid: { color: 'rgba(255,255,255,0.05)' }
+                        }
+                    }
+                }
+            });
+
+            // --- Chart 3: Monthly Win Rate line ---
+            const overallWinRate = +((trades.filter(t => t.profit > 0).length / trades.length) * 100).toFixed(1);
+            if (monthlyWinRateChartInstance) monthlyWinRateChartInstance.destroy();
+            monthlyWinRateChartInstance = new Chart(document.getElementById('monthlyWinRateChart').getContext('2d'), {
+                type: 'line',
+                data: {
+                    labels,
+                    datasets: [
+                        {
+                            label: 'Win Rate (%)',
+                            data: winRates,
+                            borderColor: 'rgba(96, 165, 250, 0.9)',
+                            backgroundColor: 'rgba(96, 165, 250, 0.15)',
+                            borderWidth: 2.5,
+                            pointRadius: 5,
+                            pointBackgroundColor: winRates.map(r => r >= overallWinRate ? 'rgba(16,185,129,0.9)' : 'rgba(239,68,68,0.9)'),
+                            tension: 0.35,
+                            fill: true
+                        },
+                        {
+                            label: `Avg (${overallWinRate}%)`,
+                            data: Array(labels.length).fill(overallWinRate),
+                            borderColor: 'rgba(167, 139, 250, 0.6)',
+                            borderWidth: 1.5,
+                            borderDash: [6, 4],
+                            pointRadius: 0,
+                            fill: false,
+                            tension: 0
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        tooltip: {
+                            callbacks: {
+                                label: ctx => `${ctx.dataset.label}: ${ctx.raw}%`
+                            }
+                        }
+                    },
+                    scales: {
+                        x: { grid: { display: false } },
+                        y: {
+                            min: 0,
+                            max: 100,
+                            title: { display: true, text: 'Win Rate (%)' },
+                            grid: { color: 'rgba(255,255,255,0.05)' },
+                            ticks: { callback: v => v + '%' }
+                        }
+                    }
                 }
             });
         }

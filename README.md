@@ -42,7 +42,7 @@ The entry pipeline runs through three layers of confluence, all of which must ag
 
 ### Equity Curve
 
-![6-Year XAUUSD Backtest — 2020 to 2026](backtest)XAUUSD_2020_2026.png)
+![6-Year XAUUSD Backtest — 2020 to 2026](backtest_XAUUSD_2020_2026.png)
 
 ---
 

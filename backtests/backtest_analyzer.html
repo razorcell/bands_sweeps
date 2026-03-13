@@ -452,6 +452,36 @@
                 grid-template-columns: 1fr;
             }
         }
+
+        /* Drawdown table styles */
+        .dd-th {
+            padding: 0.6rem 0.75rem;
+            text-align: left;
+            color: var(--text-muted);
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            cursor: pointer;
+            user-select: none;
+            white-space: nowrap;
+        }
+        .dd-th:hover { color: var(--text-main); }
+        .dd-td {
+            padding: 0.55rem 0.75rem;
+            border-bottom: 1px solid rgba(255,255,255,0.04);
+            white-space: nowrap;
+        }
+        .dd-row:hover { background: rgba(255,255,255,0.04); }
+        .dd-row.highlighted { background: rgba(239,68,68,0.08); border-left: 3px solid var(--danger); }
+        .dd-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+        .dd-badge.recovered { background: rgba(16,185,129,0.2); color: var(--success); border: 1px solid rgba(16,185,129,0.3); }
+        .dd-badge.recovering { background: rgba(239,68,68,0.2); color: var(--danger); border: 1px solid rgba(239,68,68,0.3); }
     </style>
 </head>
 <body>
@@ -494,6 +524,7 @@
             <button class="tab-btn" onclick="switchTab('calendar-tab')">Calendar View</button>
             <button class="tab-btn" onclick="switchTab('quant-tab')">Quantitative Edge</button>
             <button class="tab-btn" onclick="switchTab('monthly-tab')">📅 Monthly P/L</button>
+            <button class="tab-btn" onclick="switchTab('drawdown-tab')">📉 Drawdown</button>
         </div>
 
         <div id="speed-tab" class="tab-content active">
@@ -765,6 +796,100 @@
                 <div style="position: relative; height: 280px;">
                     <canvas id="monthlyWinRateChart"></canvas>
                 </div>
+            </div>
+        </div>
+
+        <!-- DRAWDOWN ANALYSIS TAB -->
+        <div id="drawdown-tab" class="tab-content">
+            <!-- Initial Balance input -->
+            <div style="background: var(--panel-bg); border: 1px solid var(--border-color); border-radius: 12px; padding: 1rem 1.5rem; backdrop-filter: var(--glass-blur); display: flex; align-items: center; gap: 1.5rem;">
+                <div style="display: flex; align-items: center; gap: 0.75rem;">
+                    <label for="ddInitialBalance" style="color: var(--text-muted); font-size: 0.9rem; font-weight: 600; white-space: nowrap;">Initial Account Balance ($):</label>
+                    <input type="number" id="ddInitialBalance" value="7000" min="0" step="100"
+                        style="width: 120px; padding: 0.4rem 0.75rem; border-radius: 8px; background: var(--bg-color); border: 1px solid var(--accent); color: var(--text-main); font-size: 1rem; font-weight: 700;"
+                        oninput="if(window._lastDDTrades) renderDrawdown(window._lastDDTrades)">
+                </div>
+                <p style="margin: 0; font-size: 0.8rem; color: var(--text-muted); line-height: 1.4;">
+                    This is your MT5 starting deposit. Required to calculate <strong>Depth (%)</strong> correctly.<br>
+                    MT5 reports P&amp;L changes only — the initial deposit is not in the trade data.
+                </p>
+            </div>
+
+            <!-- Summary stat cards -->
+            <div class="stats-grid" id="dd-stats">
+                <div class="stat-card">
+                    <div class="stat-title">Max Balance Drawdown</div>
+                    <div class="stat-value negative" id="ddMaxDepth">-</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-title">Avg Drawdown Depth</div>
+                    <div class="stat-value" id="ddAvgDepth">-</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-title">Total DD Periods</div>
+                    <div class="stat-value" id="ddTotalPeriods">-</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-title">Avg Recovery Time</div>
+                    <div class="stat-value" id="ddAvgRecovery">-</div>
+                </div>
+            </div>
+
+            <!-- Equity curve with shaded drawdown regions -->
+            <div class="chart-box">
+                <h3 style="margin-top:0;">Running Balance Curve with Drawdown Periods</h3>
+                <p style="font-size: 0.75rem; color: var(--text-muted); margin-top: -5px; margin-bottom: 10px;">Each red shaded region is a balance drawdown from a local peak. Hover over the line for running balance details.</p>
+                <div style="position: relative; height: 420px;">
+                    <canvas id="ddEquityChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Top drawdowns bar chart -->
+            <div class="chart-box">
+                <h3 style="margin-top:0;">Top 15 Deepest Drawdown Periods</h3>
+                <p style="font-size: 0.75rem; color: var(--text-muted); margin-top: -5px; margin-bottom: 10px;">Click a bar to highlight the trades in that period in the table below.</p>
+                <div style="position: relative; height: 320px;">
+                    <canvas id="ddBarChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Drawdown periods table -->
+            <div class="chart-box" style="padding: 1.5rem;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.75rem;">
+                    <h3 style="margin: 0;">All Drawdown Periods</h3>
+                    <div style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center;">
+                        <label style="font-size: 0.8rem; color: var(--text-muted); white-space: nowrap;">Min Depth ($):</label>
+                        <input type="number" id="ddMinDepthFilter" value="0" min="0" step="1"
+                            style="width: 90px; padding: 4px 8px; border-radius: 6px; background: var(--bg-color); border: 1px solid var(--border-color); color: var(--text-main); font-size: 0.85rem;"
+                            onkeydown="if(event.key==='Enter') applyDDFilter()">
+                        <label style="font-size: 0.8rem; color: var(--text-muted); white-space: nowrap; margin-left: 6px;">Min Depth (%):</label>
+                        <input type="number" id="ddMinDepthPctFilter" value="0" min="0" step="0.1"
+                            style="width: 80px; padding: 4px 8px; border-radius: 6px; background: var(--bg-color); border: 1px solid var(--border-color); color: var(--text-main); font-size: 0.85rem;"
+                            onkeydown="if(event.key==='Enter') applyDDFilter()">
+                        <button class="btn" onclick="applyDDFilter()" style="padding: 0.35rem 1rem; font-size: 0.8rem;">Apply</button>
+                        <span id="ddFilterCount" style="font-size: 0.8rem; color: var(--text-muted);"></span>
+                    </div>
+                </div>
+                <div style="overflow-x: auto;">
+                    <table id="ddTable" style="width: 100%; border-collapse: collapse; font-size: 0.88rem;">
+                        <thead>
+                            <tr style="border-bottom: 1px solid var(--border-color);">
+                                <th class="dd-th" onclick="sortDDTable('peak_date')">Peak Date <span id="dd-sort-peak_date">▲</span></th>
+                                <th class="dd-th" onclick="sortDDTable('trough_date')">Trough Date <span id="dd-sort-trough_date"></span></th>
+                                <th class="dd-th" onclick="sortDDTable('recovery_date')">Recovered <span id="dd-sort-recovery_date"></span></th>
+                                <th class="dd-th" onclick="sortDDTable('depth')">Depth ($) <span id="dd-sort-depth"></span></th>
+                                <th class="dd-th" onclick="sortDDTable('depth_pct')">Depth (%) <span id="dd-sort-depth_pct"></span></th>
+                                <th class="dd-th" onclick="sortDDTable('duration')">DD Trades <span id="dd-sort-duration"></span></th>
+                                <th class="dd-th" onclick="sortDDTable('recovery_trades')">Rec Trades <span id="dd-sort-recovery_trades"></span></th>
+                                <th class="dd-th">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="ddTableBody">
+                        </tbody>
+                    </table>
+                </div>
+                <!-- Pagination bar -->
+                <div id="ddPagination" style="margin-top: 1rem; padding-top: 0.75rem; border-top: 1px solid var(--border-color);"></div>
             </div>
         </div>
 
@@ -1482,6 +1607,7 @@
             renderCalendar(trades);
             renderQuant(trades);
             renderMonthly(trades);
+            renderDrawdown(trades);
         }
 
         let durationScatterChartInstance = null;
@@ -1493,6 +1619,16 @@
         let monthlyPLBarChartInstance = null;
         let monthlyWLBarChartInstance = null;
         let monthlyWinRateChartInstance = null;
+        let ddEquityChartInstance = null;
+        let ddBarChartInstance = null;
+
+        // Drawdown table state
+        let allDDPeriods = [];
+        let ddFilteredPeriods = []; // currently filtered set (used for pagination)
+        let ddSortCol = 'depth';
+        let ddSortAsc = false;
+        let ddCurrentPage = 1;
+        const DD_PAGE_SIZE = 10;
 
         function renderQuant(trades) {
             if (!trades || trades.length === 0) return;
@@ -2979,6 +3115,397 @@
                     <div style="color: var(--text-muted);">Shorts: <strong class="${sClass}">${sSign}${Math.abs(shortNet).toFixed(2)}</strong></div>
                 `;
             }
+        }
+
+        function renderDrawdown(trades) {
+            if (!trades || trades.length === 0) return;
+
+            // Cache trades so the initial-balance input can re-render without re-loading
+            window._lastDDTrades = trades;
+
+            // Read the user-supplied initial deposit (default 0 = no adjustment)
+            const initialBalance = parseFloat(document.getElementById('ddInitialBalance')?.value || 0) || 0;
+
+            // Sort trades chronologically by exit_time
+            const sorted = [...trades].filter(t => t.exit_time && t.exit_time !== '-')
+                .sort((a, b) => String(a.exit_time).localeCompare(String(b.exit_time)));
+
+            if (sorted.length === 0) return;
+
+            // Build running balance curve
+            let balance = 0;
+            let peak = 0;
+            const equityPoints = [{ x: 0, y: 0, label: 'Start' }];
+
+            // Drawdown period tracking
+            const ddPeriods = [];
+            let inDD = false;
+            let ddStart = null;  // trade index where DD started
+            let ddPeak = 0;
+            let ddPeakDate = '';
+            let ddTroughDepth = 0;
+            let ddTroughDate = '';
+            let ddTroughBalance = 0;
+
+            sorted.forEach((t, i) => {
+                balance += t.profit;
+                equityPoints.push({
+                    x: i + 1,
+                    y: +balance.toFixed(2),
+                    label: t.exit_time
+                });
+
+                if (balance > peak) {
+                    if (inDD) {
+                        // Recovered — close the drawdown period
+                        ddPeriods.push({
+                            peak_date: ddPeakDate,
+                            trough_date: ddTroughDate,
+                            recovery_date: t.exit_time,
+                            depth: +ddTroughDepth.toFixed(2),
+                            depth_pct: (initialBalance + ddPeak) > 0 ? +((ddTroughDepth / (initialBalance + ddPeak)) * 100).toFixed(2) : 0,
+                            peak_balance: +ddPeak.toFixed(2),
+                            trough_balance: +ddTroughBalance.toFixed(2),
+                            duration: (i + 1) - ddStart,         // trades inside DD
+                            recovery_trades: 1,                   // at least this trade recovered it
+                            start_idx: ddStart,
+                            end_idx: i + 1,
+                            recovered: true
+                        });
+                        inDD = false;
+                    }
+                    peak = balance;
+                    ddPeakDate = t.exit_time;
+                } else if (balance < peak) {
+                    const currentDD = peak - balance;
+                    if (!inDD) {
+                        // Start a new drawdown
+                        inDD = true;
+                        ddStart = i;   // trade index that broke below peak
+                        ddPeak = peak;
+                        ddTroughDepth = currentDD;
+                        ddTroughDate = t.exit_time;
+                        ddTroughBalance = balance;
+                    } else if (currentDD > ddTroughDepth) {
+                        // Worse trough within same DD
+                        ddTroughDepth = currentDD;
+                        ddTroughDate = t.exit_time;
+                        ddTroughBalance = balance;
+                    }
+                }
+            });
+
+            // If still in a drawdown at end, record as open
+            if (inDD) {
+                ddPeriods.push({
+                    peak_date: ddPeakDate,
+                    trough_date: ddTroughDate,
+                    recovery_date: null,
+                    depth: +ddTroughDepth.toFixed(2),
+                    depth_pct: (initialBalance + ddPeak) > 0 ? +((ddTroughDepth / (initialBalance + ddPeak)) * 100).toFixed(2) : 0,
+                    peak_balance: +ddPeak.toFixed(2),
+                    trough_balance: +ddTroughBalance.toFixed(2),
+                    duration: sorted.length - ddStart,
+                    recovery_trades: 0,
+                    start_idx: ddStart,
+                    end_idx: sorted.length,
+                    recovered: false
+                });
+            }
+
+            allDDPeriods = ddPeriods;
+
+            // --- Summary stats ---
+            const maxDD = ddPeriods.length > 0 ? Math.max(...ddPeriods.map(d => d.depth)) : 0;
+            const avgDD = ddPeriods.length > 0 ? ddPeriods.reduce((s, d) => s + d.depth, 0) / ddPeriods.length : 0;
+            const recoveredPeriods = ddPeriods.filter(d => d.recovered);
+            const avgRecovery = recoveredPeriods.length > 0
+                ? recoveredPeriods.reduce((s, d) => s + d.duration + d.recovery_trades, 0) / recoveredPeriods.length
+                : null;
+
+            document.getElementById('ddMaxDepth').textContent = `-$${maxDD.toFixed(2)}`;
+            document.getElementById('ddAvgDepth').textContent = ddPeriods.length > 0 ? `-$${avgDD.toFixed(2)}` : '-';
+            document.getElementById('ddTotalPeriods').textContent = ddPeriods.length;
+            document.getElementById('ddAvgRecovery').textContent = avgRecovery !== null ? `${avgRecovery.toFixed(1)} trades` : 'N/A';
+
+            // --- Equity Curve Chart with drawdown shading ---
+            // Use Chart.js with a custom plugin to shade drawdown regions
+            const ddShadingPlugin = {
+                id: 'ddShading',
+                beforeDraw(chart) {
+                    const { ctx, chartArea, scales } = chart;
+                    if (!chartArea) return;
+                    const xScale = scales.x;
+                    const { top, bottom } = chartArea;
+                    ctx.save();
+                    allDDPeriods.forEach(dd => {
+                        const x1 = xScale.getPixelForValue(dd.start_idx);
+                        const x2 = xScale.getPixelForValue(dd.end_idx);
+                        const alpha = Math.min(0.35, 0.1 + (dd.depth / maxDD) * 0.25);
+                        ctx.fillStyle = `rgba(239,68,68,${alpha})`;
+                        ctx.fillRect(x1, top, x2 - x1, bottom - top);
+                    });
+                    ctx.restore();
+                }
+            };
+
+            if (ddEquityChartInstance) ddEquityChartInstance.destroy();
+            ddEquityChartInstance = new Chart(document.getElementById('ddEquityChart').getContext('2d'), {
+                type: 'line',
+                plugins: [ddShadingPlugin],
+                data: {
+                    datasets: [{
+                        label: 'Running Balance',
+                        data: equityPoints,
+                        borderColor: 'rgba(96,165,250,0.9)',
+                        backgroundColor: 'rgba(96,165,250,0.08)',
+                        borderWidth: 2,
+                        pointRadius: 0,
+                        pointHoverRadius: 4,
+                        fill: true,
+                        tension: 0.2
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: false,
+                    parsing: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                title: ctx => `Trade #${ctx[0].parsed.x}`,
+                                label: ctx => {
+                                    const pt = equityPoints[ctx.dataIndex];
+                                    return [`Balance: $${ctx.parsed.y.toFixed(2)}`, `Date: ${pt.label || ''}`];
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            type: 'linear',
+                            title: { display: true, text: 'Trade #' },
+                            grid: { color: 'rgba(255,255,255,0.04)' }
+                        },
+                        y: {
+                            title: { display: true, text: 'Balance ($)' },
+                            grid: { color: 'rgba(255,255,255,0.05)' }
+                        }
+                    }
+                }
+            });
+
+            // --- Top 15 drawdown bar chart (sorted by % depth) ---
+            const top15 = [...ddPeriods].sort((a,b) => b.depth_pct - a.depth_pct).slice(0, 15);
+            const barLabels = top15.map((d, i) => `#${i+1} ${d.peak_date ? d.peak_date.substring(0,10) : ''}`);
+            const barData = top15.map(d => d.depth_pct);
+            const barColors = top15.map(d => d.recovered ? 'rgba(16,185,129,0.75)' : 'rgba(239,68,68,0.75)');
+
+            if (ddBarChartInstance) ddBarChartInstance.destroy();
+            ddBarChartInstance = new Chart(document.getElementById('ddBarChart').getContext('2d'), {
+                type: 'bar',
+                data: {
+                    labels: barLabels,
+                    datasets: [{
+                        label: 'Depth (%)',
+                        data: barData,
+                        backgroundColor: barColors,
+                        borderRadius: 4,
+                        ddRefs: top15
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: false,
+                    indexAxis: 'y',
+                    onClick: (event, activeElements) => {
+                        if (activeElements.length > 0) {
+                            const idx = activeElements[0].index;
+                            const ddRef = top15[idx];
+                            highlightDDRow(ddRef);
+                        }
+                    },
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: ctx => {
+                                    const d = top15[ctx.dataIndex];
+                                    return [
+                                        `Depth: ${d.depth_pct.toFixed(2)}% (-$${d.depth.toFixed(2)})`,
+                                        `Duration: ${d.duration} trades`,
+                                        d.recovered ? `Recovered in ${d.recovery_trades} trade(s)` : 'Still recovering'
+                                    ];
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            title: { display: true, text: 'Drawdown Depth (%)' },
+                            grid: { color: 'rgba(255,255,255,0.05)' },
+                            ticks: { callback: v => v + '%' }
+                        },
+                        y: {
+                            grid: { display: false },
+                            ticks: { font: { size: 11 } }
+                        }
+                    }
+                }
+            });
+
+            // Render the table (via filter so ddFilteredPeriods is populated for pagination)
+            ddSortCol = 'depth';
+            ddSortAsc = false;
+            ddCurrentPage = 1;
+            ddFilteredPeriods = ddPeriods; // start with all periods unfiltered
+            applyDDFilter(); // respects any filter inputs and renders table
+        }
+
+        function highlightDDRow(ddRef) {
+            // Scroll to table and highlight the matching row
+            document.querySelectorAll('.dd-row').forEach(row => row.classList.remove('highlighted'));
+            const idx = allDDPeriods.indexOf(ddRef);
+            if (idx === -1) return;
+            // Find the corresponding row by data attribute
+            const row = document.querySelector(`[data-dd-idx="${idx}"]`);
+            if (row) {
+                row.classList.add('highlighted');
+                row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+        }
+
+        function applyDDFilter() {
+            const rawDollar = document.getElementById('ddMinDepthFilter')?.value;
+            const rawPct    = document.getElementById('ddMinDepthPctFilter')?.value;
+            const minDollar = rawDollar !== '' ? (parseFloat(rawDollar) || 0) : 0;
+            const minPct    = rawPct    !== '' ? (parseFloat(rawPct)    || 0) : 0;
+
+            ddFilteredPeriods = allDDPeriods.filter(d =>
+                d.depth     >= minDollar &&
+                d.depth_pct >= minPct
+            );
+
+            const countEl = document.getElementById('ddFilterCount');
+            const hasFilter = minDollar > 0 || minPct > 0;
+            if (countEl) countEl.textContent = hasFilter
+                ? `${ddFilteredPeriods.length} of ${allDDPeriods.length} periods`
+                : `${allDDPeriods.length} periods total`;
+
+            ddCurrentPage = 1;
+            renderDDTable();
+        }
+
+        function sortDDTable(col) {
+            if (ddSortCol === col) {
+                ddSortAsc = !ddSortAsc;
+            } else {
+                ddSortCol = col;
+                ddSortAsc = col === 'peak_date' || col === 'trough_date' || col === 'recovery_date';
+            }
+            ddCurrentPage = 1;
+            renderDDTable();
+        }
+
+        function renderDDTable() {
+            const periods = ddFilteredPeriods;
+
+            // Update sort indicators
+            ['peak_date','trough_date','recovery_date','depth','depth_pct','duration','recovery_trades'].forEach(c => {
+                const el = document.getElementById(`dd-sort-${c}`);
+                if (el) el.textContent = c === ddSortCol ? (ddSortAsc ? '▲' : '▼') : '';
+            });
+
+            const sorted = [...periods].sort((a, b) => {
+                let va = a[ddSortCol], vb = b[ddSortCol];
+                if (va === null || va === undefined) va = '';
+                if (vb === null || vb === undefined) vb = '';
+                if (typeof va === 'number') return ddSortAsc ? va - vb : vb - va;
+                return ddSortAsc ? String(va).localeCompare(String(vb)) : String(vb).localeCompare(String(va));
+            });
+
+            // Pagination
+            const totalPages = Math.max(1, Math.ceil(sorted.length / DD_PAGE_SIZE));
+            if (ddCurrentPage > totalPages) ddCurrentPage = totalPages;
+            const startIdx = (ddCurrentPage - 1) * DD_PAGE_SIZE;
+            const pageRows = sorted.slice(startIdx, startIdx + DD_PAGE_SIZE);
+
+            const tbody = document.getElementById('ddTableBody');
+            tbody.innerHTML = '';
+
+            if (sorted.length === 0) {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `<td colspan="8" class="dd-td" style="text-align:center; color:var(--text-muted); padding:2rem;">No drawdown periods found matching filters.</td>`;
+                tbody.appendChild(tr);
+            } else {
+                pageRows.forEach(dd => {
+                    const realIdx = allDDPeriods.indexOf(dd);
+                    const tr = document.createElement('tr');
+                    tr.className = 'dd-row';
+                    tr.setAttribute('data-dd-idx', realIdx);
+                    tr.onmouseenter = () => tr.style.background = 'rgba(255,255,255,0.04)';
+                    tr.onmouseleave = () => {
+                        if (!tr.classList.contains('highlighted')) tr.style.background = '';
+                    };
+
+                    const statusBadge = dd.recovered
+                        ? `<span class="dd-badge recovered">✓ Recovered</span>`
+                        : `<span class="dd-badge recovering">⚠ Open</span>`;
+
+                    tr.innerHTML = `
+                        <td class="dd-td">${dd.peak_date ? dd.peak_date.substring(0,16) : '-'}</td>
+                        <td class="dd-td">${dd.trough_date ? dd.trough_date.substring(0,16) : '-'}</td>
+                        <td class="dd-td">${dd.recovery_date ? dd.recovery_date.substring(0,16) : '—'}</td>
+                        <td class="dd-td negative" style="font-weight:700;">-$${dd.depth.toFixed(2)}</td>
+                        <td class="dd-td negative">${dd.depth_pct.toFixed(1)}%</td>
+                        <td class="dd-td">${dd.duration}</td>
+                        <td class="dd-td">${dd.recovered ? dd.recovery_trades : '—'}</td>
+                        <td class="dd-td">${statusBadge}</td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+            }
+
+            // Render pagination controls
+            renderDDPagination(sorted.length, totalPages);
+        }
+
+        function renderDDPagination(totalRows, totalPages) {
+            let pag = document.getElementById('ddPagination');
+            if (!pag) return;
+            if (totalRows === 0) { pag.innerHTML = ''; return; }
+
+            const start = (ddCurrentPage - 1) * DD_PAGE_SIZE + 1;
+            const end   = Math.min(ddCurrentPage * DD_PAGE_SIZE, totalRows);
+
+            pag.innerHTML = `
+                <div style="display:flex; align-items:center; gap:0.75rem; flex-wrap:wrap;">
+                    <button class="btn" onclick="ddGoPage(${ddCurrentPage - 1})" ${ddCurrentPage <= 1 ? 'disabled' : ''}
+                        style="padding:0.3rem 0.75rem; font-size:0.8rem; ${ddCurrentPage <= 1 ? 'opacity:0.4;cursor:default;' : ''}">
+                        ‹ Prev
+                    </button>
+                    <span style="font-size:0.85rem; color:var(--text-muted);">
+                        Page <strong style="color:var(--text-main);">${ddCurrentPage}</strong> of <strong style="color:var(--text-main);">${totalPages}</strong>
+                        &nbsp;·&nbsp; Rows ${start}–${end} of ${totalRows}
+                    </span>
+                    <button class="btn" onclick="ddGoPage(${ddCurrentPage + 1})" ${ddCurrentPage >= totalPages ? 'disabled' : ''}
+                        style="padding:0.3rem 0.75rem; font-size:0.8rem; ${ddCurrentPage >= totalPages ? 'opacity:0.4;cursor:default;' : ''}">
+                        Next ›
+                    </button>
+                    <select onchange="ddGoPage(parseInt(this.value))" style="padding:0.3rem 0.5rem; border-radius:6px; background:var(--bg-color); border:1px solid var(--border-color); color:var(--text-main); font-size:0.8rem;">
+                        ${Array.from({length: totalPages}, (_,i) => `<option value="${i+1}" ${i+1===ddCurrentPage?'selected':''}>${i+1}</option>`).join('')}
+                    </select>
+                </div>
+            `;
+        }
+
+        function ddGoPage(page) {
+            const totalPages = Math.max(1, Math.ceil(ddFilteredPeriods.length / DD_PAGE_SIZE));
+            ddCurrentPage = Math.max(1, Math.min(page, totalPages));
+            renderDDTable();
         }
 
         function hideBucketDetails() {

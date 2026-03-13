@@ -1,0 +1,181 @@
+; saved on 2026.03.12 20:09:51
+; this file contains input parameters for testing/optimizing bands_liquidity expert advisor
+; to use it in the strategy tester, click Load in the context menu of the Inputs tab
+;
+__General__==== 1. General Settings ===
+InpHTF1=5||0||0||49153||N
+InpHTF2=16385||0||0||49153||N
+LotSize=0.03||0.1||0.010000||1.000000||N
+Use_Auto_Lot=false||false||0||true||N
+Risk_Percent=2||1.0||0.100000||10.000000||N
+MagicNumber=12345||12345||1||123450||N
+Show_Panel=true||false||0||true||N
+__Timing__==== 2. Entry Timing Strategy ===
+Entry_Strategy=3||0||0||1||N
+Speed_Drop_Pct=0.3||0.5||0.050000||5.000000||N
+Dir_Entry_Threshold=2||1.0||0.100000||10.000000||N
+__Speed_Filters__==== 2a. Speed Guardrails ===
+AllowedSpeedRanges=-400/400
+Dir_Relative_Ratio=0.1||0.05||0.02||0.2||N
+Dir_Relative_Min=0.02||2.0||2||20||N
+Dir_Relative_Time_Pct=0.1||0.05||0.05||0.5||N
+Show_Dir_Stop_Details=true||false||0||true||N
+__Indicators__==== 3. Indicators (BB & ATR) ===
+BB_Period=20||20||1||200||N
+BB_Dev=2||2.0||0.200000||20.000000||N
+ATR_Period=25||14||1||140||N
+M5_Extreme_Zone_Pct=0.1||0.25||0.025000||2.500000||N
+H1_Extreme_Zone_Pct=0.1||0.1||0.010000||1.000000||N
+__M5_Trend__==== 3a. M5 Trend Filter ===
+Use_M5_Trend_Filter=false||false||0||true||N
+MeanZonePct_M5=0.1||0.1||0.010000||1.000000||N
+__Trend__==== 4. H1 Trend Filter ===
+Use_Trend_Filter=true||false||0||true||N
+Block_Counter_Trend=false||false||0||true||N
+Allow_CT_On_Spikes=true||false||0||true||N
+CT_Spike_Lookback_Bars=3||3||1||30||N
+CT_Spike_ATR_Multiplier=3||2.5||0.250000||25.000000||N
+CT_Spike_ATR_Shift=3||3||1||30||N
+Trend_Method=1||0||0||1||N
+BBSlope_Lookback=3||3||1||30||N
+ADX_Period=14||14||1||140||N
+ADX_Threshold=30||25.0||2.500000||250.000000||N
+ADX_Dir_From_Mean=true||false||0||true||N
+ADX_Range_Bypass_H1=true||false||0||true||N
+ADX_Range_Bypass_M5=true||false||0||true||N
+MeanZonePct=0.1||0.1||0.010000||1.000000||N
+__DynMeanZone__==== 4b. Dynamic Mean Zone ===
+Use_Dynamic_Mean_Zone=true||false||0||true||N
+Dyn_Mean_Mode=1||0||0||1||N
+MaxMeanZonePct=0.4||0.15||0.015000||1.500000||N
+__RSI_Zone__==== 4b. H1 RSI-Adaptive Zone ===
+Use_RSI_Zone_Adapt=true||false||0||true||N
+RSI_H1_Period=14||14||1||140||N
+RSI_Strong_Up=58||70.0||7.000000||700.000000||N
+RSI_Strong_Dn=38||30.0||3.000000||300.000000||N
+RSI_Weak_Level=50||50.0||5.000000||500.000000||N
+H1_RSI_Max_Zone_Pct=0.35||0.25||0.025000||2.500000||N
+__Squeeze__==== 5. Volatility Squeeze Filter ===
+Use_Squeeze_Filter=true||false||0||true||N
+Use_M1_Squeeze_Filter=false||false||0||true||N
+M1_Squeeze_Method=1||0||0||2||N
+M1_Squeeze_ATR_Mult=4||1.5||0.150000||15.000000||N
+M1_Squeeze_Avg_Bars=20||20||1||200||N
+M1_Squeeze_Width_Pct=0.7||0.7||0.070000||7.000000||N
+Block_Entry_On_M1_Squeeze=false||false||0||true||N
+Exit_Trade_On_M1_Squeeze=true||false||0||true||N
+M1_Squeeze_SL_Multiplier=0||2.5||0.250000||25.000000||N
+Use_M5_Squeeze_Filter=true||false||0||true||N
+M5_Squeeze_Method=1||0||0||2||N
+M5_Squeeze_ATR_Mult=2.5||2.5||0.250000||25.000000||N
+M5_Squeeze_Avg_Bars=20||20||1||200||N
+M5_Squeeze_Width_Pct=0.5||0.7||0.070000||7.000000||N
+Block_Entry_On_M5_Squeeze=true||false||0||true||N
+Exit_Trade_On_M5_Squeeze=true||false||0||true||N
+M5_Squeeze_SL_Multiplier=0||2.5||0.250000||25.000000||N
+Use_H1_Squeeze_Filter=true||false||0||true||N
+H1_Squeeze_Method=1||0||0||2||N
+H1_Squeeze_ATR_Mult=2.5||2.5||0.250000||25.000000||N
+H1_Squeeze_Avg_Bars=5||20||1||200||N
+H1_Squeeze_Width_Pct=0.5||0.7||0.070000||7.000000||N
+Block_Entry_On_H1_Squeeze=true||false||0||true||N
+Exit_Trade_On_H1_Squeeze=true||false||0||true||N
+H1_Squeeze_SL_Multiplier=0||2.5||0.250000||25.000000||N
+__Ranging__==== 5b. Ranging Market Filter ===
+Use_Ranging_Filter=true||false||0||true||N
+Ranging_ADX_TF=16385||0||0||49153||N
+Ranging_ADX_Threshold=20||20||1||200||N
+__Fib50_Zone__==== 5c. Fibonacci 50% Zone ===
+Use_Fib50_Filter=true||false||0||true||N
+Use_Fib38_Trending=true||false||0||true||N
+__M1_Momentum__==== 5d. M1 HH/LL Momentum Filter ===
+Use_M1_Momentum=true||false||0||true||N
+M1_Mom_Include_Current=false||false||0||true||N
+M1_Mom_Include_If_Broken=true||false||0||true||N
+M1_Mom_Lookback=10||6||1||15||N
+M1_Mom_Trend_Threshold=76||60||2||75||N
+M1_Mom_Range_Threshold=60||55.0||5.500000||550.000000||N
+M1_Mom_Bypass_HTF=false||false||0||true||N
+M1_Mom_Bypass_MTF=false||false||0||true||N
+M1_Mom_Allow_Neutral=true||false||0||true||N
+M1_Mom_Bypass_Extreme=true||false||0||true||N
+M1_Mom_Bypass_ShowRect=false||false||0||true||N
+M1_Mom_Bypass_Lookback=16||5||1||50||N
+M1_Mom_Bypass_Near_Pct=0.1||0.1||0.010000||1.000000||N
+M1_Mom_Bypass_Prev_Bars=8||5||1||50||N
+M1_Mom_Bypass_Multiplier=4||5.0||0.500000||50.000000||N
+Show_Candle_Speeds=true||false||0||true||N
+Candle_Speed_Lookback=20||1440||1||14400||N
+__SMC__==== 6. SMC Internal Liquidity ===
+SwingLookback=100||100||1||1000||N
+EqualThresholdATR=0.2||0.2||0.020000||2.000000||N
+ClusterToleranceATR=2||2.0||0.200000||20.000000||N
+MajorSwingCandles=15||15||1||150||N
+__DeepSweep__==== 7. Deep Sweep Logic ===
+Use_Deep_Sweep=true||false||0||true||N
+DeepSweep_MinBars=30||30||1||300||N
+DeepSweep_ATR=0.5||1.0||0.100000||10.000000||N
+DeepSweep_M1_Bypass_Disable=true||false||0||true||N
+Show_DeepSweep_Lines=false||false||0||true||N
+Show_DeepSweep_Labels=false||false||0||true||N
+__NormalSweep__==== 7b. Normal Sweep Logic ===
+Use_Normal_Sweep=true||false||0||true||N
+NormalSweep_ATR=0||0.5||0.050000||5.000000||N
+Show_NormalSweep_Lines=true||false||0||true||N
+Show_NormalSweep_Labels=true||false||0||true||N
+__Unretested__==== 7c. Unretested Fractal Filter ===
+Use_Unretested_Fractal_Filter=true||false||0||true||N
+Show_Unretested_Visuals=true||false||0||true||N
+Unretested_Min_ATR_Range=1.5||1.5||0.150000||15.000000||N
+__Clearance__==== 8. Structural Clearance ===
+Use_Clearance_Filter=false||false||0||true||N
+Clearance_Multiplier=0.5||0.382||0.038200||3.820000||N
+__News__==== 9. High Impact News Filter ===
+Use_News_Filter=false||false||0||true||N
+MinsBeforeNews=60||60||1||600||N
+MinsAfterNews=60||60||1||600||N
+__SLTP__==== 10. Stop Loss & Standard TP ===
+SL_ATR_Multiplier=3||2||1||5||Y
+TP_Type=1||0||0||1||N
+__HTF_Target_Upgrade__==== 9. HTF Target Upgrades (Med Term Position) ===
+Use_HTF_TP_Upgrade=false||false||0||true||N
+HTF_Upgrade_Target=3||0||0||3||N
+HTF_TP_Execution_Mode=0||0||0||2||N
+HTF_TP_Range_Pct=22||15||1||150||N
+Bypass_Squeeze_Exit_On_HTF=true||false||0||true||N
+__Momentum__==== 11. Strong Momentum Hold ===
+Use_Momentum_Hold=true||false||0||true||N
+Require_Spike_Entry=true||false||0||true||N
+Spike_Lookback_Bars=3||3||1||30||N
+Spike_ATR_Multiplier=2.5||2.5||0.250000||25.000000||N
+Spike_ATR_Shift=3||3||1||30||N
+Opposite_Band_Tolerance=0.1||0.1||0.010000||1.000000||N
+Opposite_Band_Fast_Push_Bars=3||3||1||30||N
+Fast_Push_H1_Mean_Exit=true||false||0||true||N
+__BOS__==== 12. BOS Risk Manager ===
+Use_BOS_Exit=true||false||0||true||N
+BOS_Confirm_ATR=1||0.3||0.030000||3.000000||N
+BOS_Retest_ATR=0.5||0.5||0.050000||5.000000||N
+Wait_For_BOS_Retest=true||false||0||true||N
+__Crawl__==== 13. Slow Crawl Exit ===
+Use_Crawl_Exit=false||false||0||true||N
+Crawl_MA_Period=5||5||1||50||N
+Crawl_Consecutive_Bars=4||3||1||30||N
+Crawl_Distance_ATR=0.4||0.5||0.050000||5.000000||N
+__MeanLoss__==== 14. Mean Touch Loss Exit ===
+Use_Mean_Loss_Exit=true||false||0||true||N
+__Visuals__==== 14. Dashboard & Visuals ===
+M5_Visual_History=100||100||1||1000||N
+H1_Visual_History=48||48||1||480||N
+Show_Liquidity_Lines=false||false||0||true||N
+Show_LQ_Labels=false||false||0||true||N
+Show_Liquidity_Clusters=false||false||0||true||N
+Disable_Chart_Visuals=false||false||0||true||N
+Disable_Dashboard_Panel=false||false||0||true||N
+__EODFilter__==== 12a. End Of Day Filter ===
+Use_EOD_Filter=true||false||0||true||N
+EOD_Mins_Before=30||30||1||300||N
+EOD_Mins_After=30||30||1||300||N
+__TradingHours__==== 12b. Trading Hours Filter ===
+Use_Trading_Hours=true||false||0||true||N
+Blocked_Hours=2,3

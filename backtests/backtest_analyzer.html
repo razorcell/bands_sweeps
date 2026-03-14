@@ -2755,6 +2755,135 @@
                 }
             }
 
+            // --- NEW: Daily Prediction via KNN ---
+            const kNeighbors = 5;
+            const featureDays = 3;
+            const predictionData = {}; // maps dateStr to { predictedProfit, isCorrectDirection }
+            const trainingBase = [];
+            
+            // Calculate an appropriate burn-in period. We aim for ~3 years (750 trading days).
+            // Fallback to 50% of the data if there's less than 750 days, but require at least 10 days to start predicting anything.
+            const totalDays = chronologicalDates.length;
+            const burnInLimit = Math.max(10, Math.min(750, Math.floor(totalDays * 0.5)));
+
+            for (let i = featureDays; i < totalDays; i++) {
+                const dateStr = chronologicalDates[i];
+                const actualProfit = dailyData[dateStr].profit;
+                
+                // Construct feature vector for Day i
+                const features = [];
+                for (let j = 1; j <= featureDays; j++) {
+                    features.push(dailyData[chronologicalDates[i - j]].profit);
+                }
+                
+                // If past burn-in period and we have enough neighbors to compare
+                if (i >= burnInLimit && trainingBase.length >= kNeighbors) {
+                    // Find K nearest neighbors using Euclidean distance
+                    const distances = trainingBase.map((tb, idx) => {
+                        let distSq = 0;
+                        for(let f = 0; f < featureDays; f++) {
+                            distSq += Math.pow(features[f] - tb.features[f], 2);
+                        }
+                        return { dist: Math.sqrt(distSq), result: tb.nextResult };
+                    });
+                    
+                    distances.sort((a, b) => a.dist - b.dist);
+                    
+                    const topK = distances.slice(0, kNeighbors);
+                    let sumPredicted = 0;
+                    topK.forEach(n => sumPredicted += n.result);
+                    const predictedProfit = sumPredicted / topK.length;
+                    
+                    // Determine if the direction was correct
+                    let isCorrectDirection = null;
+                    if ((predictedProfit > 0 && actualProfit > 0) || (predictedProfit < 0 && actualProfit < 0)) {
+                        isCorrectDirection = true;
+                    } else if ((predictedProfit > 0 && actualProfit <= 0) || (predictedProfit < 0 && actualProfit >= 0)) {
+                        isCorrectDirection = false;
+                    } else if (predictedProfit === 0 && actualProfit === 0) {
+                        isCorrectDirection = true;
+                    }
+                    
+                    predictionData[dateStr] = {
+                        predictedProfit,
+                        isCorrectDirection
+                    };
+                }
+                
+                // Add Day i to training base for future predictions (Walk-forward)
+                trainingBase.push({
+                    features: features,
+                    nextResult: actualProfit
+                });
+            }
+
+            // --- Forecast upcoming days to end of month ---
+            if (totalDays > featureDays && trainingBase.length >= kNeighbors) {
+                const lastDateStr = chronologicalDates[totalDays - 1];
+                const parts = lastDateStr.split('-');
+                let y = parseInt(parts[0]);
+                let m = parseInt(parts[1]) - 1;
+                let d = parseInt(parts[2]);
+                
+                const lastDate = new Date(y, m, d);
+                const currentMonthDays = new Date(y, m + 1, 0).getDate();
+                
+                let currentFeatures = [];
+                for (let j = 0; j < featureDays; j++) {
+                    currentFeatures.unshift(dailyData[chronologicalDates[totalDays - 1 - j]].profit);
+                }
+
+                for (let futureD = d + 1; futureD <= currentMonthDays; futureD++) {
+                    const futureDateObj = new Date(y, m, futureD);
+                    if (futureDateObj.getDay() !== 0 && futureDateObj.getDay() !== 6) {
+                        const futureDateStr = `${y}-${String(m + 1).padStart(2, '0')}-${String(futureD).padStart(2, '0')}`;
+                        
+                        // Predict based on currentFeatures
+                        const distances = trainingBase.map(tb => {
+                            let distSq = 0;
+                            for(let f = 0; f < featureDays; f++) {
+                                distSq += Math.pow(currentFeatures[f] - tb.features[f], 2);
+                            }
+                            return { dist: Math.sqrt(distSq), result: tb.nextResult };
+                        });
+                        
+                        distances.sort((a, b) => a.dist - b.dist);
+                        const topK = distances.slice(0, kNeighbors);
+                        let sumPredicted = 0;
+                        topK.forEach(n => sumPredicted += n.result);
+                        const expectedProfit = sumPredicted / topK.length;
+                        
+                        // Add to dailyData mapping as a dedicated empty/forecast day so the calendar renders it
+                        dailyData[futureDateStr] = { 
+                            profit: 0, trades: 0, wins: 0, losses: 0, tradeList: [],
+                            isForecastOnly: true 
+                        };
+                        
+                        // Tag for Prediction UI overlay
+                        predictionData[futureDateStr] = {
+                            predictedProfit: expectedProfit,
+                            isCorrectDirection: null // Hasn't happened yet
+                        };
+                        
+                        // Walk our features forward using our own prediction
+                        currentFeatures.shift();
+                        currentFeatures.push(expectedProfit);
+                    }
+                }
+            }
+
+            // --- Accuracy Stats ---
+            let correctCount = 0;
+            let totalPredictedDays = 0;
+            Object.values(predictionData).forEach(p => {
+                if (p.isCorrectDirection !== null) {
+                    totalPredictedDays++;
+                    if (p.isCorrectDirection) correctCount++;
+                }
+            });
+            const predictionAccuracy = totalPredictedDays > 0 ? ((correctCount / totalPredictedDays) * 100).toFixed(1) : 0;
+            // --- END Prediction Logic ---
+
             const months = {};
             const monthSummaries = {};
             Object.keys(dailyData).forEach(dateStr => {
@@ -2786,7 +2915,23 @@
             const mainDiv = document.createElement('div');
             mainDiv.className = 'calendar-month'; // Use the same block style
             
-            let html = `<div class="calendar-month-title">Daily Net Profits</div>`;
+            let html = '';
+            
+            // Add global accuracy badge to the top when predicting
+            if (totalPredictedDays > 0) {
+                const accColor = predictionAccuracy >= 50 ? 'var(--success)' : 'var(--danger)';
+                html += `
+                    <div style="display: flex; justify-content: center; margin-bottom: 1.5rem;">
+                        <div style="background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); padding: 0.5rem 1rem; border-radius: 8px; display: flex; align-items: center; gap: 0.75rem;">
+                            <span style="font-size: 0.85rem; color: var(--text-muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">Direction Accuracy</span>
+                            <span style="font-size: 1.1rem; font-weight: 800; color: ${accColor};">${predictionAccuracy}%</span>
+                            <span style="font-size: 0.75rem; color: rgba(255,255,255,0.3); margin-left: -4px;">(${correctCount}/${totalPredictedDays} days)</span>
+                        </div>
+                    </div>
+                `;
+            }
+
+            html += `<div class="calendar-month-title">Daily Net Profits</div>`;
             html += `<div class="calendar-grid">`;
             
             // Empty top-left cell for the month column header
@@ -2887,15 +3032,30 @@
                         if (cell) {
                             const data = cell.data;
                             if (data !== undefined) {
-                                runningMonthNet += data.profit;
+                                
+                                const isForecastOnly = data.isForecastOnly === true;
+                                
+                                if (!isForecastOnly) {
+                                    runningMonthNet += data.profit;
+                                }
+
                                 const isProfit = data.profit > 0;
                                 const isLoss = data.profit < 0;
-                                const cls = isProfit ? 'profit' : (isLoss ? 'loss' : 'neutral');
+                                
+                                let cls = 'neutral';
+                                if (isForecastOnly) {
+                                    cls = 'neutral'; // Forecast days get a neutral dark background
+                                } else if (isProfit) {
+                                    cls = 'profit';
+                                } else if (isLoss) {
+                                    cls = 'loss';
+                                }
+
                                 const sign = data.profit > 0 ? '+$' : (data.profit < 0 ? '-$' : '$');
                                 const val = Math.abs(data.profit).toFixed(2);
                                 
                                 let recoveryHtml = '';
-                                if (isLoss && recoveryData[cell.dateStr]) {
+                                if (!isForecastOnly && isLoss && recoveryData[cell.dateStr]) {
                                     const rec = recoveryData[cell.dateStr];
                                     if (rec.recovered) {
                                         recoveryHtml = `<div class="recovery-pill recovered" style="margin-top: 0.25rem;">Rec in ${rec.daysToRecover}d</div>`;
@@ -2903,24 +3063,52 @@
                                         recoveryHtml = `<div class="recovery-pill pending" style="margin-top: 0.25rem;">> ${rec.daysToRecover}d (Open)</div>`;
                                     }
                                 }
+
+                                let predictionHtml = '';
+                                if (predictionData[cell.dateStr]) {
+                                    const pred = predictionData[cell.dateStr];
+                                    const pSign = pred.predictedProfit > 0 ? '+' : '';
+                                    const pVal = pred.predictedProfit.toFixed(2);
+                                    let icon = '';
+                                    if (pred.isCorrectDirection === true) icon = ' <span style="font-size: 0.75rem;">✅</span>';
+                                    else if (pred.isCorrectDirection === false) icon = ' <span style="font-size: 0.75rem;">❌</span>';
+                                    else if (isForecastOnly) icon = ' <span style="font-size: 0.65rem; opacity: 0.6;">(Forecast)</span>';
+                                    
+                                    const bgPred = isForecastOnly ? 'rgba(59, 130, 246, 0.15)' : 'rgba(0,0,0,0.25)';
+                                    const borderPred = isForecastOnly ? 'rgba(59, 130, 246, 0.3)' : 'rgba(255,255,255,0.05)';
+                                    const textColor = isForecastOnly ? 'var(--text-main)' : 'var(--text-main)';
+
+                                    predictionHtml = `<div style="font-size: 0.65rem; margin-top: 0.35rem; font-weight: 600; color: ${textColor}; background: ${bgPred}; border: 1px solid ${borderPred}; padding: 2px 4px; border-radius: 4px; line-height: 1.2;">Pred: ${pSign}${pVal}${icon}</div>`;
+                                }
                                 
                                 const mtdSign = runningMonthNet >= 0 ? '+$' : '-$';
                                 const mtdColor = runningMonthNet > 0 ? 'var(--success)' : (runningMonthNet < 0 ? 'var(--danger)' : 'var(--text-muted)');
 
-                                html += `
-                                    <div class="calendar-day ${cls}" style="${cellStyle}; cursor: pointer;" onclick="handleCalendarClick('${cell.dateStr}')" title="Click to view trades">
-                                        <div class="calendar-date">${cell.dayObj} <span class="calendar-doy" title="Day of the year">#${cell.dayOfYear}</span></div>
-                                        <div class="calendar-value">${sign}${val}</div>
-                                        <div style="font-size: 0.65rem; padding-top: 0.25rem; font-weight: 500; opacity: 0.9;">
-                                            <span style="color: rgba(255,255,255,0.8);">${data.trades} T:</span> 
-                                            <span style="color:var(--success);">${data.wins}</span><span style="opacity: 0.5;">/</span><span style="color:var(--danger);">${data.losses}</span>
+                                if (isForecastOnly) {
+                                    html += `
+                                        <div class="calendar-day ${cls}" style="${cellStyle}; opacity: 0.7; border: 1px dashed rgba(255,255,255,0.2);">
+                                            <div class="calendar-date" style="color: var(--accent);">${cell.dayObj} <span class="calendar-doy">#${cell.dayOfYear}</span></div>
+                                            <div class="calendar-value" style="color: var(--text-muted); font-size: 0.7rem;">Waiting...</div>
+                                            ${predictionHtml}
                                         </div>
-                                        <div style="font-size: 0.65rem; padding-top: 0.15rem; font-weight: 600; color: ${mtdColor}; opacity: 0.9;">
-                                            MTD: ${mtdSign}${Math.abs(runningMonthNet).toFixed(2)}
+                                    `;
+                                } else {
+                                    html += `
+                                        <div class="calendar-day ${cls}" style="${cellStyle}; cursor: pointer;" onclick="handleCalendarClick('${cell.dateStr}')" title="Click to view trades">
+                                            <div class="calendar-date">${cell.dayObj} <span class="calendar-doy" title="Day of the year">#${cell.dayOfYear}</span></div>
+                                            <div class="calendar-value">${sign}${val}</div>
+                                            <div style="font-size: 0.65rem; padding-top: 0.25rem; font-weight: 500; opacity: 0.9;">
+                                                <span style="color: rgba(255,255,255,0.8);">${data.trades} T:</span> 
+                                                <span style="color:var(--success);">${data.wins}</span><span style="opacity: 0.5;">/</span><span style="color:var(--danger);">${data.losses}</span>
+                                            </div>
+                                            <div style="font-size: 0.65rem; padding-top: 0.15rem; font-weight: 600; color: ${mtdColor}; opacity: 0.9;">
+                                                MTD: ${mtdSign}${Math.abs(runningMonthNet).toFixed(2)}
+                                            </div>
+                                            ${recoveryHtml}
+                                            ${predictionHtml}
                                         </div>
-                                        ${recoveryHtml}
-                                    </div>
-                                `;
+                                    `;
+                                }
                             } else {
                                 html += `
                                     <div class="calendar-day neutral" style="opacity: 0.3; ${cellStyle}">

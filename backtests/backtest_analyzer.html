@@ -1280,6 +1280,8 @@
                         let volIdx = -1;
                         let priceIdx = -1;
                         let symbolIdx = -1;
+                        let commIdx = -1;
+                        let swapIdx = -1;
 
                         // Scan all rows to find the actual table headers (in MT5 this could be row 700+)
                         for (let r = 0; r < rows.length; r++) {
@@ -1297,6 +1299,8 @@
                                 if (text === 'volume' || text === 'size') volIdx = idx;
                                 if (text === 'price') priceIdx = idx;
                                 if (text === 'symbol' || text === 'item') symbolIdx = idx;
+                                if (text === 'commission' || text === 'comm') commIdx = idx;
+                                if (text === 'swap' || text === 'swaps') swapIdx = idx;
                             }
                             
                             // We need profit and comment. Break if we found profit in THIS row.
@@ -1316,6 +1320,8 @@
                             let pendingTradeType = null;
                             let pendingVolume = null;
                             let pendingEntryPrice = null;
+                            let pendingComm = 0;
+                            let pendingSwap = 0;
                             
                             let r = headerIdx + 1;
                             const chunkSize = 2000;
@@ -1340,6 +1346,12 @@
                                                                commentText.match(/speed.*?(-?\d+(?:\.\d+)?)/i) || 
                                                                commentText.match(/spd.*?(-?\d+(?:\.\d+)?)/i);
                                             
+                                            const v = parseFloat(volText.split('/')[0].trim()) || 0;
+                                            const cText = commIdx !== -1 && cells.length > commIdx ? cells[commIdx].textContent.trim().replace(/[^\d.-]/g, '') : "0";
+                                            const sText = swapIdx !== -1 && cells.length > swapIdx ? cells[swapIdx].textContent.trim().replace(/[^\d.-]/g, '') : "0";
+                                            const inComm = parseFloat(cText) || 0;
+                                            const inSwap = parseFloat(sText) || 0;
+
                                             if (speed4dMatch) {
                                                 pendingSpeed = parseFloat(speed4dMatch[1]);
                                                 pendingPrevSpeed = parseFloat(speed4dMatch[2]);
@@ -1347,20 +1359,41 @@
                                                 pendingComment = commentText;
                                                 pendingEntryTime = tradeTime;
                                                 pendingTradeType = tradeType;
-                                                pendingVolume = volText;
+                                                pendingVolume = v;
                                                 pendingEntryPrice = priceText;
+                                                pendingComm = inComm;
+                                                pendingSwap = inSwap;
                                             } else if (speedMatch) {
                                                 pendingSpeed = parseFloat(speedMatch[1]);
                                                 pendingComment = commentText;
                                                 pendingEntryTime = tradeTime;
                                                 pendingTradeType = tradeType;
-                                                pendingVolume = volText;
+                                                pendingVolume = v;
                                                 pendingEntryPrice = priceText;
+                                                pendingComm = inComm;
+                                                pendingSwap = inSwap;
                                             }
                                         } else if (direction === 'out' && pendingSpeed !== null) {
                                             const cleanProfit = profitText.replace(/[^\d.-]/g, '');
-                                            const profit = parseFloat(cleanProfit);
+                                            let profit = parseFloat(cleanProfit);
                                             if (!isNaN(profit)) {
+                                                const v = parseFloat(volText.split('/')[0].trim()) || 0;
+                                                
+                                                const cText = commIdx !== -1 && cells.length > commIdx ? cells[commIdx].textContent.trim().replace(/[^\d.-]/g, '') : "0";
+                                                const sText = swapIdx !== -1 && cells.length > swapIdx ? cells[swapIdx].textContent.trim().replace(/[^\d.-]/g, '') : "0";
+                                                const outComm = parseFloat(cText) || 0;
+                                                const outSwap = parseFloat(sText) || 0;
+                                                
+                                                let proportion = 1.0;
+                                                if (pendingVolume > 0 && v > 0 && v <= pendingVolume) {
+                                                    proportion = v / pendingVolume;
+                                                }
+                                                
+                                                const appliedInComm = pendingComm * proportion;
+                                                const appliedInSwap = pendingSwap * proportion;
+                                                
+                                                profit += (outComm + outSwap + appliedInComm + appliedInSwap);
+
                                                 let tradeObj = { 
                                                     profit, 
                                                     speed: pendingSpeed, 
@@ -1368,7 +1401,7 @@
                                                     entry_time: pendingEntryTime,
                                                     exit_time: tradeTime,
                                                     trade_type: pendingTradeType,
-                                                    volume: pendingVolume || volText,
+                                                    volume: volText,
                                                     entry_price: pendingEntryPrice,
                                                     exit_price: priceText,
                                                     symbol: symbolText
@@ -1378,20 +1411,37 @@
                                                     tradeObj.time_sec = pendingTimeSec;
                                                 }
                                                 trades.push(tradeObj);
+                                                
+                                                if (pendingVolume > 0 && v > 0 && v < pendingVolume - 0.0001) {
+                                                    // Partial close
+                                                    pendingVolume -= v;
+                                                    pendingComm -= appliedInComm;
+                                                    pendingSwap -= appliedInSwap;
+                                                } else {
+                                                    // Full close
+                                                    pendingSpeed = null;
+                                                    pendingPrevSpeed = null;
+                                                    pendingTimeSec = null;
+                                                    pendingComment = null;
+                                                    pendingVolume = null;
+                                                    pendingEntryPrice = null;
+                                                    pendingComm = 0;
+                                                    pendingSwap = 0;
+                                                }
                                             }
-                                            pendingSpeed = null;
-                                            pendingPrevSpeed = null;
-                                            pendingTimeSec = null;
-                                            pendingComment = null;
-                                            pendingVolume = null;
-                                            pendingEntryPrice = null;
                                         } else if (direction === "") {
                                             const speed4dMatch = commentText.match(/(?:B|S)\|(-?\d+(?:\.\d+)?)\|(-?\d+(?:\.\d+)?)\|(\d+)/i);
                                             const speedMatch = commentText.match(/\|\s*(-?\d+(?:\.\d+)?)\s*pts\/s/i) || 
                                                                commentText.match(/speed.*?(-?\d+(?:\.\d+)?)/i) || 
                                                                commentText.match(/spd.*?(-?\d+(?:\.\d+)?)/i);
                                             const cleanProfit = profitText.replace(/[^\d.-]/g, '');
-                                            const profit = parseFloat(cleanProfit);
+                                            let profit = parseFloat(cleanProfit);
+                                            
+                                            // Add commission and swap
+                                            const cText = commIdx !== -1 && cells.length > commIdx ? cells[commIdx].textContent.trim().replace(/[^\d.-]/g, '') : "0";
+                                            const sText = swapIdx !== -1 && cells.length > swapIdx ? cells[swapIdx].textContent.trim().replace(/[^\d.-]/g, '') : "0";
+                                            profit += (parseFloat(cText) || 0) + (parseFloat(sText) || 0);
+                                            
                                             if (!isNaN(profit) && profit !== 0) {
                                                 if (speed4dMatch) {
                                                     trades.push({ 

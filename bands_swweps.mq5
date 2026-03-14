@@ -241,6 +241,7 @@ input bool                 Bypass_Squeeze_Exit_On_HTF = true;      // [TOGGLE] I
 
 input string               __Momentum__ = "=== 11. Strong Momentum Hold ===";
 input bool                 Use_Momentum_Hold = true;       // [TOGGLE] Ignore standard TP if structure is in our favor          
+input bool                 Only_Trade_When_MomHold = false; // [TOGGLE] Only allow NEW entries that qualify as a momentum hold (spike targeting opposite band)
 input bool                 Require_Spike_Entry = true;     // [TOGGLE] Only hold if entry was caused by a large price spike
 input int                  Spike_Lookback_Bars = 3;        // Evaluate range of the last X bars at entry
 input double               Spike_ATR_Multiplier = 2.5;     // Range must be > X times the ATR to qualify
@@ -248,6 +249,12 @@ input int                  Spike_ATR_Shift = 3;            // Shift ATR reading 
 input double               Opposite_Band_Tolerance = 0.10; // Forced exit if within X% of opposite band extreme
 input int                  Opposite_Band_Fast_Push_Bars = 3; // Block opposite band exit if hit within first X bars
 input bool                 Fast_Push_H1_Mean_Exit = true;  // [TOGGLE] Exit fast push if H1 Mean is touched
+
+input string               __MH_MeanPullback__ = "=== 11a. Momentum Hold - Mean Pullback Protection ===";
+input bool                 Use_MH_Mean_Pullback = true;    // [TOGGLE] Reduce size & lock SL when price nears M1 mean during momentum hold
+input double               MH_MeanPullback_ReducePct = 0.30; // Fraction of position to close when mean is touched (0.30 = 30%)
+input double               MH_MeanPullback_SL_ATR = 0.10;   // Move SL to breakeven + this many ATR after partial close
+input double               MH_MeanPullback_Trigger_Pct = 0.70; // Trigger when price covers this % of the entry-band→mean distance (0.70 = 70%)
 
 input string               __BOS__ = "=== 12. BOS Risk Manager ===";
 input bool                 Use_BOS_Exit = true;      // [TOGGLE] Exit early on broken structures returning against us
@@ -327,6 +334,9 @@ bool   trade_is_spike = false;
 bool   d_pure_momentum = false; 
 string d_mom_status = "WAITING"; 
 bool   active_trade_is_upgraded = false;
+
+// Mean Pullback Protection State (per-trade)
+bool   mh_mean_pullback_done = false;  // True once partial close + SL move has fired for this trade
 
 //--- Dashboard Logic Variables ---
 bool d_m5_buy, d_m5_sell, d_h1_buy, d_h1_sell;
@@ -586,6 +596,7 @@ void OnTick() {
         current_ticket = 0; bos_armed = false; tracked_struct_level = 0.0; trade_start_time = 0;
         trade_is_spike = false; d_pure_momentum = false; d_mom_status = "N/A";
         active_trade_is_upgraded = false;
+        mh_mean_pullback_done = false;
         CheckEntry();
     }
 
@@ -2274,6 +2285,34 @@ void CheckEntry() {
         }
     }
 
+    // --- MOMENTUM HOLD ENTRY GATE ---
+    // If Only_Trade_When_MomHold is enabled, only take trades whose entry bar cluster
+    // qualifies as a spike (same condition that makes Use_Momentum_Hold target the opposite band).
+    if(Only_Trade_When_MomHold && Use_Momentum_Hold) {
+        // Evaluate spike on bar 0 (the entry bar being considered)
+        bool entry_qualifies_as_spike = true;
+        if(Require_Spike_Entry) {
+            double max_h = 0.0;
+            double min_l = 999999.0;
+            for(int k = 0; k < Spike_Lookback_Bars; k++) {
+                double h = iHigh(_Symbol, _Period, k);
+                double l = iLow(_Symbol, _Period, k);
+                if(h > max_h) max_h = h;
+                if(l < min_l) min_l = l;
+            }
+            double setup_range = max_h - min_l;
+            int safe_shift = Spike_ATR_Shift;
+            if(safe_shift >= ArraySize(atr_m1)) safe_shift = ArraySize(atr_m1) - 1;
+            if(atr_m1[safe_shift] > 0 && setup_range < (atr_m1[safe_shift] * Spike_ATR_Multiplier)) {
+                entry_qualifies_as_spike = false;
+            }
+        }
+        if(!entry_qualifies_as_spike) {
+            valid_buy_setup  = false;
+            valid_sell_setup = false;
+        }
+    }
+
     // Track Peak Speeds LIVE as price approaches entries
     if(Entry_Strategy == ENTRY_DECELERATION) {
         if(d_h1_buy || d_m5_buy || d_extreme_buy || d_sweep_buy) {
@@ -3224,6 +3263,7 @@ void ManageOpenTrades() {
                 bos_armed = false;
                 tracked_struct_level = 0.0;
                 trade_start_time = open_time;
+                mh_mean_pullback_done = false; // Reset per-trade flag
                 // DO NOT overwrite active_trade_is_upgraded here!
                 // It was just calculated and set in CheckEntry() -> InitDynamicTP()
                 
@@ -3446,6 +3486,60 @@ void ManageOpenTrades() {
             if(!close_trade && had_fast_push && Fast_Push_H1_Mean_Exit) {
                 if(pos_type == POSITION_TYPE_BUY  && current_price >= bb_base_h1[0]) close_trade = true;
                 if(pos_type == POSITION_TYPE_SELL && current_price <= bb_base_h1[0]) close_trade = true;
+            }
+
+            // --- MOMENTUM HOLD: MEAN PULLBACK PROTECTION ---
+            // When price reaches the M1 BB mean during a momentum hold trade:
+            //   1. Close MH_MeanPullback_ReducePct (default 30%) of the position.
+            //   2. Move SL to breakeven + MH_MeanPullback_SL_ATR * ATR.
+            // Fires only once per trade. Target remains unchanged.
+            if(!close_trade && Use_MH_Mean_Pullback && Use_Momentum_Hold && d_pure_momentum && !mh_mean_pullback_done) {
+                // Trigger when price has covered MH_MeanPullback_Trigger_Pct of the entry-band-to-mean distance
+                // BUY  entered near lower band: fire when price >= lower_band + pct*(mean - lower_band)
+                // SELL entered near upper band: fire when price <= upper_band - pct*(upper_band - mean)
+                double half_band    = (bb_up_m1[0] - bb_dn_m1[0]) * 0.5; // = mean-to-band distance
+                double trigger_pct  = MH_MeanPullback_Trigger_Pct;
+                bool near_mean = false;
+                if(pos_type == POSITION_TYPE_BUY  && current_price >= (bb_dn_m1[0] + half_band * trigger_pct)) near_mean = true;
+                if(pos_type == POSITION_TYPE_SELL && current_price <= (bb_up_m1[0] - half_band * trigger_pct)) near_mean = true;
+                
+                if(near_mean) {
+                    mh_mean_pullback_done = true; // Guard — only fires once
+                    
+                    double cur_lots = PositionGetDouble(POSITION_VOLUME);
+                    double close_lots = NormalizeDouble(cur_lots * MH_MeanPullback_ReducePct, 2);
+                    
+                    // Clamp to broker min/max
+                    double min_lot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+                    double lot_step = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
+                    close_lots = MathFloor(close_lots / lot_step) * lot_step;
+                    if(close_lots < min_lot) close_lots = min_lot;
+                    if(close_lots >= cur_lots) close_lots = cur_lots; // Safety: don't close more than we have
+                    
+                    // Partial close
+                    if(close_lots >= min_lot && close_lots < cur_lots) {
+                        trade.PositionClosePartial(ticket, close_lots);
+                    }
+                    
+                    // Move SL to breakeven + ATR buffer in our favour (locks in a small profit)
+                    // BUY:  SL = entry + buffer  (above entry → profit locked)
+                    // SELL: SL = entry - buffer  (below entry → profit locked)
+                    double sl_buffer = atr_m1[0] * MH_MeanPullback_SL_ATR;
+                    double new_sl;
+                    if(pos_type == POSITION_TYPE_BUY) {
+                        new_sl = NormalizeDouble(open_price + sl_buffer, _Digits);
+                        // Only move SL if it's actually an improvement (higher than current SL)
+                        double cur_sl = PositionGetDouble(POSITION_SL);
+                        if(new_sl > cur_sl) trade.PositionModify(ticket, new_sl, PositionGetDouble(POSITION_TP));
+                    } else {
+                        new_sl = NormalizeDouble(open_price - sl_buffer, _Digits);
+                        // Only move SL if it's actually an improvement (lower than current SL)
+                        double cur_sl = PositionGetDouble(POSITION_SL);
+                        if(cur_sl == 0 || new_sl < cur_sl) trade.PositionModify(ticket, new_sl, PositionGetDouble(POSITION_TP));
+                    }
+                    
+                    d_mom_status = StringFormat("HOLDING (MeanPullback: %.0f%% closed, SL locked)", MH_MeanPullback_ReducePct * 100.0);
+                }
             }
 
             // B. If Pure Momentum is FALSE, we execute standard profit targets

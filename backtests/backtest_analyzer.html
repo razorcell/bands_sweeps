@@ -482,6 +482,56 @@
         }
         .dd-badge.recovered { background: rgba(16,185,129,0.2); color: var(--success); border: 1px solid rgba(16,185,129,0.3); }
         .dd-badge.recovering { background: rgba(239,68,68,0.2); color: var(--danger); border: 1px solid rgba(239,68,68,0.3); }
+
+        /* Dual Range Slider for Filters */
+        .dual-slider-container {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+        .dual-slider {
+            position: relative;
+            width: 100%;
+            height: 30px;
+            display: flex;
+            align-items: center;
+        }
+        .dual-slider input[type=range] {
+            position: absolute;
+            width: 100%;
+            pointer-events: none;
+            -webkit-appearance: none;
+            appearance: none;
+            background: transparent;
+            margin: 0;
+            z-index: 2;
+        }
+        .dual-slider input[type=range]::-webkit-slider-thumb {
+            pointer-events: auto;
+            -webkit-appearance: none;
+            appearance: none;
+            width: 18px;
+            height: 18px;
+            background: var(--text-main);
+            border: 3px solid var(--accent);
+            border-radius: 50%;
+            cursor: pointer;
+            box-shadow: 0 0 5px rgba(0,0,0,0.5);
+        }
+        .slider-track {
+            position: absolute;
+            width: 100%;
+            height: 6px;
+            background: rgba(255,255,255,0.05);
+            border-radius: 3px;
+        }
+        .slider-range {
+            position: absolute;
+            height: 6px;
+            background: var(--accent);
+            border-radius: 3px;
+            z-index: 1;
+        }
     </style>
 </head>
 <body>
@@ -514,6 +564,7 @@
             <label for="reportSelect" style="color: var(--text-muted); font-weight: 600;">Select Report:</label>
             <select id="reportSelect" style="max-width: 400px; flex: 1; border: 1px solid var(--border-color); padding: 0.5rem 1rem; border-radius: 6px; background: #1e293b; color: var(--text-main); font-family: inherit; appearance: auto;"></select>
             <button class="btn" style="padding: 0.5rem 1.5rem;" onclick="loadSelectedReport()">Load</button>
+            <button class="btn" style="padding: 0.5rem 1.5rem; background-color: var(--success);" onclick="openMergeModal()">Merge...</button>
             <button class="btn" style="padding: 0.5rem 1.5rem; background-color: var(--danger);" onclick="deleteSelectedReport()">Delete</button>
         </div>
 
@@ -524,6 +575,7 @@
             <button class="tab-btn" onclick="switchTab('calendar-tab')">Calendar View</button>
             <button class="tab-btn" onclick="switchTab('quant-tab')">Quantitative Edge</button>
             <button class="tab-btn" onclick="switchTab('monthly-tab')">📅 Monthly P/L</button>
+            <button class="tab-btn" onclick="switchTab('daily-tab')">📅 Daily P/L</button>
             <button class="tab-btn" onclick="switchTab('drawdown-tab')">📉 Drawdown</button>
         </div>
 
@@ -799,6 +851,70 @@
             </div>
         </div>
 
+        <!-- DAILY P/L TAB -->
+        <div id="daily-tab" class="tab-content">
+            <!-- Daily Date Range Slider -->
+            <div class="chart-box" style="padding: 1.5rem; min-height: auto;">
+                <div style="display: flex; justify-content: space-between; margin-bottom: 0.2rem;">
+                    <span id="dailyStartDateLabel" style="font-size: 0.85rem; color: var(--text-muted); font-weight: 600;">-</span>
+                    <span style="font-size: 0.85rem; color: var(--text-main); font-weight: 700;">Filter Viewing Period</span>
+                    <span id="dailyEndDateLabel" style="font-size: 0.85rem; color: var(--text-muted); font-weight: 600;">-</span>
+                </div>
+                <div class="dual-slider">
+                    <div class="slider-track"></div>
+                    <div class="slider-range" id="dailySliderRange"></div>
+                    <input type="range" id="dailyStartRange" min="0" max="100" value="0">
+                    <input type="range" id="dailyEndRange" min="0" max="100" value="100">
+                </div>
+            </div>
+
+            <div class="stats-grid" id="daily-stats">
+                <div class="stat-card">
+                    <div class="stat-title">Best Day</div>
+                    <div class="stat-value positive" id="bestDay">-</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-title">Worst Day</div>
+                    <div class="stat-value negative" id="worstDay">-</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-title">Avg Daily P/L</div>
+                    <div class="stat-value" id="avgDailyPL">-</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-title">Profitable Days</div>
+                    <div class="stat-value" id="profitableDays">-</div>
+                </div>
+            </div>
+
+            <!-- Daily Net Profit bar chart -->
+            <div class="chart-box">
+                <h3 style="margin-top:0;">Daily Net Profit Distribution</h3>
+                <p style="font-size: 0.75rem; color: var(--text-muted); margin-top: -5px; margin-bottom: 10px;">Click a bar to view individual trades for that day</p>
+                <div style="position: relative; height: 380px;">
+                    <canvas id="dailyPLBarChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Daily Win/Loss count stacked bar -->
+            <div class="chart-box">
+                <h3 style="margin-top:0;">Daily Win / Loss Trade Count</h3>
+                <p style="font-size: 0.75rem; color: var(--text-muted); margin-top: -5px; margin-bottom: 10px;">Stacked count of winning vs losing trades per day</p>
+                <div style="position: relative; height: 300px;">
+                    <canvas id="dailyWLBarChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Daily Win Rate line chart -->
+            <div class="chart-box">
+                <h3 style="margin-top:0;">Daily Win Rate (%)</h3>
+                <p style="font-size: 0.75rem; color: var(--text-muted); margin-top: -5px; margin-bottom: 10px;">Percentage of winning trades per day, with overall average dashed line</p>
+                <div style="position: relative; height: 280px;">
+                    <canvas id="dailyWinRateChart"></canvas>
+                </div>
+            </div>
+        </div>
+
         <!-- DRAWDOWN ANALYSIS TAB -->
         <div id="drawdown-tab" class="tab-content">
             <!-- Initial Balance input -->
@@ -908,6 +1024,7 @@
                         <tr>
                             <th style="padding: 0.75rem; border-bottom: 1px solid var(--border-color); color: var(--text-muted); cursor: pointer; user-select: none;" onclick="handleSort('entry_time')">Entry Time <span id="sort-entry_time">▲</span></th>
                             <th style="padding: 0.75rem; border-bottom: 1px solid var(--border-color); color: var(--text-muted); cursor: pointer; user-select: none;" onclick="handleSort('exit_time')">Exit Time <span id="sort-exit_time"></span></th>
+                            <th style="padding: 0.75rem; border-bottom: 1px solid var(--border-color); color: var(--text-muted); cursor: pointer; user-select: none;" onclick="handleSort('symbol')">Symbol <span id="sort-symbol"></span></th>
                             <th style="padding: 0.75rem; border-bottom: 1px solid var(--border-color); color: var(--text-muted); cursor: pointer; user-select: none;" onclick="handleSort('trade_type')">Type <span id="sort-trade_type"></span></th>
                             <th style="padding: 0.75rem; border-bottom: 1px solid var(--border-color); color: var(--text-muted); cursor: pointer; user-select: none;" onclick="handleSort('volume')">Lot <span id="sort-volume"></span></th>
                             <th style="padding: 0.75rem; border-bottom: 1px solid var(--border-color); color: var(--text-muted); cursor: pointer; user-select: none;" onclick="handleSort('entry_price')">Entry <span id="sort-entry_price"></span></th>
@@ -930,6 +1047,34 @@
     <div id="analysis-loading-overlay">
         <div class="big-ring"></div>
         <div class="load-label" id="analysis-loading-label">Analyzing...</div>
+    </div>
+
+    <!-- Merge Reports Modal -->
+    <div id="merge-modal-overlay" style="display: none; position: fixed; inset: 0; background: rgba(15, 23, 42, 0.85); z-index: 2000; backdrop-filter: blur(8px); align-items: center; justify-content: center; padding: 2rem;">
+        <div style="background: var(--panel-bg); border: 1px solid var(--border-color); border-radius: 12px; padding: 2rem; width: 100%; max-width: 500px; display: flex; flex-direction: column; gap: 1.5rem; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);">
+            <h3 style="margin: 0; font-size: 1.5rem;">Merge Reports</h3>
+            <p style="margin: 0; font-size: 0.9rem; color: var(--text-muted);">Select two reports to merge into a single combined report. Trades will be combined and sorted chronologically.</p>
+            
+            <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+                <label style="color: var(--text-muted); font-size: 0.85rem; font-weight: 600;">Report 1</label>
+                <select id="mergeReportSelect1" style="border: 1px solid var(--border-color); padding: 0.75rem 1rem; border-radius: 6px; background: var(--bg-color); color: var(--text-main); font-size: 1rem;"></select>
+            </div>
+            
+            <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+                <label style="color: var(--text-muted); font-size: 0.85rem; font-weight: 600;">Report 2</label>
+                <select id="mergeReportSelect2" style="border: 1px solid var(--border-color); padding: 0.75rem 1rem; border-radius: 6px; background: var(--bg-color); color: var(--text-main); font-size: 1rem;"></select>
+            </div>
+            
+            <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+                <label style="color: var(--text-muted); font-size: 0.85rem; font-weight: 600;">New Merged Report Name</label>
+                <input type="text" id="mergeReportName" placeholder="e.g. Merged_XAU_US30" style="border: 1px solid var(--border-color); padding: 0.75rem 1rem; border-radius: 6px; background: var(--bg-color); color: var(--text-main); font-size: 1rem;">
+            </div>
+            
+            <div style="display: flex; justify-content: flex-end; gap: 1rem; margin-top: 1rem;">
+                <button class="btn" style="background: transparent; border: 1px solid var(--border-color); color: var(--text-muted);" onclick="closeMergeModal()">Cancel</button>
+                <button class="btn" style="background-color: var(--success);" onclick="executeMerge()">Merge & Save</button>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -1657,6 +1802,7 @@
             renderCalendar(trades);
             renderQuant(trades);
             renderMonthly(trades);
+            renderDaily(trades);
             renderDrawdown(trades);
         }
 
@@ -1669,6 +1815,9 @@
         let monthlyPLBarChartInstance = null;
         let monthlyWLBarChartInstance = null;
         let monthlyWinRateChartInstance = null;
+        let dailyPLBarChartInstance = null;
+        let dailyWLBarChartInstance = null;
+        let dailyWinRateChartInstance = null;
         let ddEquityChartInstance = null;
         let ddBarChartInstance = null;
 
@@ -2512,17 +2661,19 @@
 
             const bestEl = document.getElementById('bestMonth');
             if (bestEl) {
-                bestEl.textContent = `${labels[bestMonthIdx]}: +$${profits[bestMonthIdx].toFixed(2)}`;
-                bestEl.className = 'stat-value positive';
+                const val = profits[bestMonthIdx] || 0;
+                bestEl.textContent = `${labels[bestMonthIdx]}: ${val >= 0 ? '+' : '-'}$${Math.abs(val).toFixed(2)}`;
+                bestEl.className = 'stat-value ' + (val >= 0 ? 'positive' : 'negative');
             }
             const worstEl = document.getElementById('worstMonth');
             if (worstEl) {
-                worstEl.textContent = `${labels[worstMonthIdx]}: -$${Math.abs(profits[worstMonthIdx]).toFixed(2)}`;
-                worstEl.className = 'stat-value negative';
+                const val = profits[worstMonthIdx] || 0;
+                worstEl.textContent = `${labels[worstMonthIdx]}: ${val >= 0 ? '+' : '-'}$${Math.abs(val).toFixed(2)}`;
+                worstEl.className = 'stat-value ' + (val >= 0 ? 'positive' : 'negative');
             }
             const avgEl = document.getElementById('avgMonthlyPL');
             if (avgEl) {
-                avgEl.textContent = `${avgPL >= 0 ? '+' : ''}$${avgPL.toFixed(2)}`;
+                avgEl.textContent = `${avgPL >= 0 ? '+' : '-'}$${Math.abs(avgPL || 0).toFixed(2)}`;
                 avgEl.className = 'stat-value ' + (avgPL >= 0 ? 'positive' : 'negative');
             }
             const pmEl = document.getElementById('profitableMonths');
@@ -2690,6 +2841,307 @@
                     }
                 }
             });
+        }
+
+        let globalDailyData = null;
+
+        function handleDailySliderInput(e) {
+            let start = parseInt(document.getElementById('dailyStartRange').value);
+            let end = parseInt(document.getElementById('dailyEndRange').value);
+            let gap = 0;
+            if(end - start <= gap){
+                if(e.target.id === 'dailyStartRange'){
+                    document.getElementById('dailyStartRange').value = end - gap;
+                } else {
+                    document.getElementById('dailyEndRange').value = start + gap;
+                }
+            }
+            updateDailyCharts();
+        }
+
+        function updateDailyCharts() {
+            if (!globalDailyData) return;
+            const startIdx = parseInt(document.getElementById('dailyStartRange').value);
+            const endIdx = parseInt(document.getElementById('dailyEndRange').value);
+            
+            if (startIdx >= endIdx) return;
+
+            const rangeMin = Math.min(startIdx, endIdx);
+            const rangeMax = Math.max(startIdx, endIdx);
+
+            const { labels, profits, wins, losses, winRates, allTrades, dailyData, sortedKeys } = globalDailyData;
+            const fLabels = labels.slice(rangeMin, rangeMax + 1);
+            const fProfits = profits.slice(rangeMin, rangeMax + 1);
+            const fWins = wins.slice(rangeMin, rangeMax + 1);
+            const fLosses = losses.slice(rangeMin, rangeMax + 1);
+            const fWinRates = winRates.slice(rangeMin, rangeMax + 1);
+            const fAllTrades = allTrades.slice(rangeMin, rangeMax + 1);
+
+            document.getElementById('dailyStartDateLabel').textContent = fLabels.length > 0 ? fLabels[0] : '-';
+            document.getElementById('dailyEndDateLabel').textContent = fLabels.length > 0 ? fLabels[fLabels.length - 1] : '-';
+
+            const rangeInputMax = parseInt(document.getElementById('dailyStartRange').max) || 1;
+            const percent1 = (rangeMin / rangeInputMax) * 100;
+            const percent2 = (rangeMax / rangeInputMax) * 100;
+            const sliderRangeEl = document.getElementById('dailySliderRange');
+            sliderRangeEl.style.left = percent1 + '%';
+            sliderRangeEl.style.width = (percent2 - percent1) + '%';
+
+            let bestDayIdx = 0, worstDayIdx = 0;
+            let totalPL = 0;
+            let profitableCount = 0;
+            let filteredTradesCount = 0;
+            let filteredWinsCount = 0;
+
+            if (fProfits.length > 0) {
+                fProfits.forEach((p, i) => {
+                    if (p > fProfits[bestDayIdx]) bestDayIdx = i;
+                    if (p < fProfits[worstDayIdx]) worstDayIdx = i;
+                    totalPL += p;
+                    if (p > 0) profitableCount++;
+                });
+                
+                fAllTrades.forEach(trArr => {
+                    filteredTradesCount += trArr.length;
+                    filteredWinsCount += trArr.filter(t => t.profit > 0).length;
+                });
+            }
+
+            const avgPL = fProfits.length > 0 ? totalPL / fProfits.length : 0;
+            const overallWinRate = filteredTradesCount > 0 ? +((filteredWinsCount / filteredTradesCount) * 100).toFixed(1) : 0;
+
+            const bestEl = document.getElementById('bestDay');
+            if (bestEl) {
+                const val = fProfits.length > 0 ? fProfits[bestDayIdx] : 0;
+                bestEl.textContent = fLabels.length > 0 ? `${fLabels[bestDayIdx]}: ${val >= 0 ? '+' : '-'}$${Math.abs(val).toFixed(2)}` : '-';
+                bestEl.className = 'stat-value ' + (val >= 0 ? 'positive' : 'negative');
+            }
+            const worstEl = document.getElementById('worstDay');
+            if (worstEl) {
+                const val = fProfits.length > 0 ? fProfits[worstDayIdx] : 0;
+                worstEl.textContent = fLabels.length > 0 ? `${fLabels[worstDayIdx]}: ${val >= 0 ? '+' : '-'}$${Math.abs(val).toFixed(2)}` : '-';
+                worstEl.className = 'stat-value ' + (val >= 0 ? 'positive' : 'negative');
+            }
+            const avgEl = document.getElementById('avgDailyPL');
+            if (avgEl) {
+                avgEl.textContent = `${avgPL >= 0 ? '+' : '-'}$${Math.abs(avgPL || 0).toFixed(2)}`;
+                avgEl.className = 'stat-value ' + (avgPL >= 0 ? 'positive' : 'negative');
+            }
+            const pmEl = document.getElementById('profitableDays');
+            if (pmEl) {
+                pmEl.textContent = `${profitableCount} / ${fProfits.length}`;
+                pmEl.className = 'stat-value ' + (profitableCount > fProfits.length / 2 ? 'positive' : 'negative');
+            }
+
+            Chart.defaults.color = '#94a3b8';
+            Chart.defaults.font.family = 'Inter';
+
+            // --- Chart 1: Daily Net Profit bar ---
+            const barColors = fProfits.map(p => p >= 0 ? 'rgba(16, 185, 129, 0.82)' : 'rgba(239, 68, 68, 0.82)');
+            const borderColors = fProfits.map(p => p >= 0 ? 'rgba(16, 185, 129, 1)' : 'rgba(239, 68, 68, 1)');
+
+            if (dailyPLBarChartInstance) dailyPLBarChartInstance.destroy();
+            dailyPLBarChartInstance = new Chart(document.getElementById('dailyPLBarChart').getContext('2d'), {
+                type: 'bar',
+                data: {
+                    labels: fLabels,
+                    datasets: [{
+                        label: 'Net Profit',
+                        data: fProfits,
+                        backgroundColor: barColors,
+                        borderColor: borderColors,
+                        borderWidth: 1,
+                        borderRadius: 5,
+                        tradesData: fAllTrades
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    onHover: (event, chartElement) => {
+                        event.native.target.style.cursor = chartElement.length ? 'pointer' : 'default';
+                    },
+                    onClick: (event, activeElements) => {
+                        if (activeElements.length > 0) {
+                            const idx = activeElements[0].index;
+                            const dayLabel = fLabels[idx];
+                            const dayTrades = fAllTrades[idx];
+                            if (dayTrades && dayTrades.length > 0) {
+                                showBucketDetails(dayLabel, dayTrades, 'Day');
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: ctx => {
+                                    const p = ctx.raw;
+                                    const d = dailyData[fLabels[ctx.dataIndex]];
+                                    return [
+                                        `Net: ${p >= 0 ? '+' : ''}$${p.toFixed(2)}`,
+                                        `Trades: ${d.wins + d.losses}  |  ${d.wins}W / ${d.losses}L`
+                                    ];
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: { grid: { display: false } },
+                        y: {
+                            title: { display: true, text: 'Net Profit ($)' },
+                            grid: { color: 'rgba(255,255,255,0.05)' },
+                            afterFit: axis => { axis.width = 65; }
+                        }
+                    }
+                }
+            });
+
+            // --- Chart 2: Daily W/L stacked bar ---
+            if (dailyWLBarChartInstance) dailyWLBarChartInstance.destroy();
+            dailyWLBarChartInstance = new Chart(document.getElementById('dailyWLBarChart').getContext('2d'), {
+                type: 'bar',
+                data: {
+                    labels: fLabels,
+                    datasets: [
+                        {
+                            label: 'Wins',
+                            data: fWins,
+                            backgroundColor: 'rgba(16, 185, 129, 0.75)',
+                            borderRadius: { topLeft: 4, topRight: 4 }
+                        },
+                        {
+                            label: 'Losses',
+                            data: fLosses,
+                            backgroundColor: 'rgba(239, 68, 68, 0.75)',
+                            borderRadius: { topLeft: 4, topRight: 4 }
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        tooltip: {
+                            callbacks: {
+                                label: ctx => `${ctx.dataset.label}: ${ctx.raw}`
+                            }
+                        }
+                    },
+                    scales: {
+                        x: { stacked: true, grid: { display: false } },
+                        y: {
+                            stacked: true,
+                            title: { display: true, text: 'Trade Count' },
+                            grid: { color: 'rgba(255,255,255,0.05)' }
+                        }
+                    }
+                }
+            });
+
+            // --- Chart 3: Daily Win Rate line ---
+            if (dailyWinRateChartInstance) dailyWinRateChartInstance.destroy();
+            dailyWinRateChartInstance = new Chart(document.getElementById('dailyWinRateChart').getContext('2d'), {
+                type: 'line',
+                data: {
+                    labels: fLabels,
+                    datasets: [
+                        {
+                            label: 'Win Rate (%)',
+                            data: fWinRates,
+                            borderColor: 'rgba(96, 165, 250, 0.9)',
+                            backgroundColor: 'rgba(96, 165, 250, 0.15)',
+                            borderWidth: 2.5,
+                            pointRadius: 5,
+                            pointBackgroundColor: fWinRates.map(r => r >= overallWinRate ? 'rgba(16,185,129,0.9)' : 'rgba(239,68,68,0.9)'),
+                            tension: 0.35,
+                            fill: true
+                        },
+                        {
+                            label: `Avg (${overallWinRate}%)`,
+                            data: Array(fLabels.length).fill(overallWinRate),
+                            borderColor: 'rgba(167, 139, 250, 0.6)',
+                            borderWidth: 1.5,
+                            borderDash: [6, 4],
+                            pointRadius: 0,
+                            fill: false,
+                            tension: 0
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        tooltip: {
+                            callbacks: {
+                                label: ctx => `${ctx.dataset.label}: ${ctx.raw}%`
+                            }
+                        }
+                    },
+                    scales: {
+                        x: { grid: { display: false } },
+                        y: {
+                            min: 0,
+                            max: 100,
+                            title: { display: true, text: 'Win Rate (%)' },
+                            grid: { color: 'rgba(255,255,255,0.05)' },
+                            ticks: { callback: v => v + '%' }
+                        }
+                    }
+                }
+            });
+        }
+
+        function renderDaily(trades) {
+            if (!trades || trades.length === 0) return;
+
+            const dailyData = {};
+
+            trades.forEach(t => {
+                if (!t.exit_time || t.exit_time === '-') return;
+                const match = t.exit_time.match(/^(\d{4})\.(\d{2})\.(\d{2})/);
+                if (match) {
+                    const key = `${match[1]}-${match[2]}-${match[3]}`;
+                    if (!dailyData[key]) {
+                        dailyData[key] = { profit: 0, wins: 0, losses: 0, trades: [] };
+                    }
+                    dailyData[key].profit += t.profit;
+                    if (t.profit > 0) dailyData[key].wins++;
+                    else dailyData[key].losses++;
+                    dailyData[key].trades.push(t);
+                }
+            });
+
+            const sortedKeys = Object.keys(dailyData).sort();
+            if (sortedKeys.length === 0) return;
+
+            const labels = sortedKeys;
+            const profits = sortedKeys.map(k => dailyData[k].profit);
+            const wins    = sortedKeys.map(k => dailyData[k].wins);
+            const losses  = sortedKeys.map(k => dailyData[k].losses);
+            const winRates = sortedKeys.map(k => {
+                const d = dailyData[k];
+                const total = d.wins + d.losses;
+                return total > 0 ? +((d.wins / total) * 100).toFixed(1) : 0;
+            });
+            const allTrades = sortedKeys.map(k => dailyData[k].trades);
+
+            globalDailyData = { labels, profits, wins, losses, winRates, allTrades, dailyData, sortedKeys };
+
+            const startSlider = document.getElementById('dailyStartRange');
+            const endSlider = document.getElementById('dailyEndRange');
+            
+            startSlider.max = labels.length > 0 ? labels.length - 1 : 0;
+            endSlider.max = labels.length > 0 ? labels.length - 1 : 0;
+            
+            startSlider.value = 0;
+            endSlider.value = labels.length > 0 ? labels.length - 1 : 0;
+            
+            startSlider.oninput = handleDailySliderInput;
+            endSlider.oninput = handleDailySliderInput;
+
+            updateDailyCharts();
         }
 
         function renderCalendar(trades) {
@@ -3273,7 +3725,7 @@
             tbody.innerHTML = '';
             
             // Update sort indicators
-            const sortCols = ['entry_time', 'exit_time', 'trade_type', 'volume', 'entry_price', 'exit_price', 'speed', 'profit'];
+            const sortCols = ['entry_time', 'exit_time', 'symbol', 'trade_type', 'volume', 'entry_price', 'exit_price', 'speed', 'profit'];
             sortCols.forEach(c => {
                 const span = document.getElementById(`sort-${c}`);
                 if (span) {
@@ -3330,6 +3782,7 @@
                 tr.innerHTML = `
                     <td style="padding: 0.75rem;">${t.entry_time || '-'}</td>
                     <td style="padding: 0.75rem;">${t.exit_time || '-'}</td>
+                    <td style="padding: 0.75rem; font-weight: 600;">${t.symbol || '-'}</td>
                     <td style="padding: 0.75rem; text-transform: uppercase; font-size: 0.8rem; letter-spacing: 0.5px;">${t.trade_type || '-'}</td>
                     <td style="padding: 0.75rem;">${t.volume !== undefined && t.volume !== null ? t.volume : '-'}</td>
                     <td style="padding: 0.75rem;">${t.entry_price || '-'}</td>
@@ -3748,6 +4201,79 @@
 
         function hideBucketDetails() {
             document.getElementById('bucket-details-overlay').style.display = 'none';
+        }
+
+        function openMergeModal() {
+            if (allReports.length < 2) {
+                alert('You need at least 2 reports to merge.');
+                return;
+            }
+            const sel1 = document.getElementById('mergeReportSelect1');
+            const sel2 = document.getElementById('mergeReportSelect2');
+            sel1.innerHTML = '';
+            sel2.innerHTML = '';
+            
+            allReports.forEach((report, index) => {
+                const opt1 = document.createElement('option');
+                opt1.value = index;
+                opt1.textContent = report.filename + ` (${report.trades.length})`;
+                sel1.appendChild(opt1);
+                
+                const opt2 = document.createElement('option');
+                opt2.value = index;
+                opt2.textContent = report.filename + ` (${report.trades.length})`;
+                sel2.appendChild(opt2);
+            });
+            
+            sel1.selectedIndex = 0;
+            sel2.selectedIndex = 1;
+            
+            document.getElementById('mergeReportName').value = `Merged_${Date.now().toString().slice(-6)}`;
+            document.getElementById('merge-modal-overlay').style.display = 'flex';
+        }
+
+        function closeMergeModal() {
+            document.getElementById('merge-modal-overlay').style.display = 'none';
+        }
+
+        function executeMerge() {
+            const idx1 = parseInt(document.getElementById('mergeReportSelect1').value);
+            const idx2 = parseInt(document.getElementById('mergeReportSelect2').value);
+            let mergedName = document.getElementById('mergeReportName').value.trim();
+            
+            if (isNaN(idx1) || isNaN(idx2)) {
+                alert('Please select two valid reports.');
+                return;
+            }
+            if (idx1 === idx2) {
+                alert('Please select two DIFFERENT reports to merge.');
+                return;
+            }
+            if (!mergedName) {
+                mergedName = `Merged_${Date.now().toString().slice(-6)}`;
+            }
+            
+            const rep1 = allReports[idx1];
+            const rep2 = allReports[idx2];
+            
+            let mergedTrades = [...rep1.trades, ...rep2.trades];
+            
+            // Re-sort by entry_time chronologically
+            mergedTrades.sort((a, b) => {
+                const ta = new Date(a.entry_time.replace(/\./g, '/')).getTime();
+                const tb = new Date(b.entry_time.replace(/\./g, '/')).getTime();
+                if (!isNaN(ta) && !isNaN(tb)) return ta - tb;
+                return 0; 
+            });
+            
+            allReports.push({ filename: mergedName, trades: mergedTrades });
+            
+            saveReportsToStorage();
+            populateReportDropdown();
+            
+            document.getElementById('reportSelect').value = (allReports.length - 1).toString();
+            closeMergeModal();
+            handleReportSelection();
         }
     </script>
 </body>

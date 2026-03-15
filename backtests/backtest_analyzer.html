@@ -309,7 +309,7 @@
 
         .calendar-container.full-width .calendar-day {
             aspect-ratio: auto;
-            min-height: 80px;
+            min-height: 8.5em; /* Increased size, automatically scales with parent's font-size during zoom */
         }
 
         .calendar-day.empty {
@@ -712,12 +712,12 @@
 
         <div id="calendar-tab" class="tab-content">
             <div class="calendar-controls-floating">
-                <button class="btn" style="padding: 0.6rem 1rem; font-size: 0.85rem; background: transparent; color: var(--text-main); border: 1px solid var(--border-color);" onclick="toggleFullWidth()" id="fullWidthBtn">Full Width</button>
+                <button class="btn" style="padding: 0.6rem 1rem; font-size: 0.85rem; background: rgba(255, 255, 255, 0.1); color: var(--text-main); border: 1px solid var(--text-main);" onclick="toggleFullWidth()" id="fullWidthBtn">Full Width</button>
                 <button class="btn" style="padding: 0.6rem 1rem; font-size: 0.85rem;" onclick="zoomCalendar(0.1)">+ Grow</button>
                 <button class="btn" style="padding: 0.6rem 1rem; font-size: 0.85rem;" onclick="zoomCalendar(-0.1)">- Shrink</button>
             </div>
             
-            <div class="calendar-container" id="calendar-container">
+            <div class="calendar-container full-width" id="calendar-container">
                 <!-- Months will be injected here -->
             </div>
         </div>
@@ -3605,7 +3605,7 @@
                 div.style.transform = `scale(1)`;
                 // Instead of scale zooming out which breaks sticky, we just expand the width and let content flow
                 div.style.width = `calc(100% * ${currentCalendarZoom})`;
-                div.style.maxWidth = isFullWidth ? '100%' : `calc(800px * ${currentCalendarZoom})`;
+                div.style.maxWidth = isFullWidth ? 'none' : `calc(800px * ${currentCalendarZoom})`; // Remove 100% max-width cap so cards actually grow
                 div.style.fontSize = `${currentCalendarZoom}rem`; // Scale the text using rems
             } else {
                 div.style.fontSize = `1rem`;

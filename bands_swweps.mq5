@@ -1319,12 +1319,14 @@ void EvaluateDashboardStates() {
                 if(ask > h1_sqz_mss_level) { h1_post_squeeze_release = false; ObjectDelete(0, h1_mss_obj); } // MSS Up -> Clear
             }
             if(h1_post_squeeze_release && h1_sqz_mss_level > 0) {
-                if(ObjectFind(0, h1_mss_obj) < 0) ObjectCreate(0, h1_mss_obj, OBJ_HLINE, 0, 0, h1_sqz_mss_level);
-                ObjectSetDouble(0, h1_mss_obj, OBJPROP_PRICE, h1_sqz_mss_level);
-                ObjectSetInteger(0, h1_mss_obj, OBJPROP_COLOR, clrOrange);
-                ObjectSetInteger(0, h1_mss_obj, OBJPROP_STYLE, STYLE_DASH);
-                ObjectSetInteger(0, h1_mss_obj, OBJPROP_WIDTH, 2);
-            }
+                if(!Disable_Chart_Visuals) {
+                    if(ObjectFind(0, h1_mss_obj) < 0) ObjectCreate(0, h1_mss_obj, OBJ_HLINE, 0, 0, h1_sqz_mss_level);
+                    ObjectSetDouble(0, h1_mss_obj, OBJPROP_PRICE, h1_sqz_mss_level);
+                    ObjectSetInteger(0, h1_mss_obj, OBJPROP_COLOR, clrOrange);
+                    ObjectSetInteger(0, h1_mss_obj, OBJPROP_STYLE, STYLE_DASH);
+                    ObjectSetInteger(0, h1_mss_obj, OBJPROP_WIDTH, 2);
+                } else { ObjectDelete(0, h1_mss_obj); }
+            } else { ObjectDelete(0, h1_mss_obj); }
         } else { ObjectDelete(0, h1_mss_obj); }
 
         // M5 Evaluation
@@ -1339,12 +1341,14 @@ void EvaluateDashboardStates() {
                 if(ask > m5_sqz_mss_level) { m5_post_squeeze_release = false; ObjectDelete(0, m5_mss_obj); }
             }
             if(m5_post_squeeze_release && m5_sqz_mss_level > 0) {
-                if(ObjectFind(0, m5_mss_obj) < 0) ObjectCreate(0, m5_mss_obj, OBJ_HLINE, 0, 0, m5_sqz_mss_level);
-                ObjectSetDouble(0, m5_mss_obj, OBJPROP_PRICE, m5_sqz_mss_level);
-                ObjectSetInteger(0, m5_mss_obj, OBJPROP_COLOR, clrOrange);
-                ObjectSetInteger(0, m5_mss_obj, OBJPROP_STYLE, STYLE_DOT);
-                ObjectSetInteger(0, m5_mss_obj, OBJPROP_WIDTH, 1);
-            }
+                if(!Disable_Chart_Visuals) {
+                    if(ObjectFind(0, m5_mss_obj) < 0) ObjectCreate(0, m5_mss_obj, OBJ_HLINE, 0, 0, m5_sqz_mss_level);
+                    ObjectSetDouble(0, m5_mss_obj, OBJPROP_PRICE, m5_sqz_mss_level);
+                    ObjectSetInteger(0, m5_mss_obj, OBJPROP_COLOR, clrOrange);
+                    ObjectSetInteger(0, m5_mss_obj, OBJPROP_STYLE, STYLE_DOT);
+                    ObjectSetInteger(0, m5_mss_obj, OBJPROP_WIDTH, 1);
+                } else { ObjectDelete(0, m5_mss_obj); }
+            } else { ObjectDelete(0, m5_mss_obj); }
         } else { ObjectDelete(0, m5_mss_obj); }
 
         // M1 Evaluation
@@ -1359,12 +1363,14 @@ void EvaluateDashboardStates() {
                 if(ask > m1_sqz_mss_level) { m1_post_squeeze_release = false; ObjectDelete(0, m1_mss_obj); }
             }
             if(m1_post_squeeze_release && m1_sqz_mss_level > 0) {
-                if(ObjectFind(0, m1_mss_obj) < 0) ObjectCreate(0, m1_mss_obj, OBJ_HLINE, 0, 0, m1_sqz_mss_level);
-                ObjectSetDouble(0, m1_mss_obj, OBJPROP_PRICE, m1_sqz_mss_level);
-                ObjectSetInteger(0, m1_mss_obj, OBJPROP_COLOR, clrCoral);
-                ObjectSetInteger(0, m1_mss_obj, OBJPROP_STYLE, STYLE_DOT);
-                ObjectSetInteger(0, m1_mss_obj, OBJPROP_WIDTH, 1);
-            }
+                if(!Disable_Chart_Visuals) {
+                    if(ObjectFind(0, m1_mss_obj) < 0) ObjectCreate(0, m1_mss_obj, OBJ_HLINE, 0, 0, m1_sqz_mss_level);
+                    ObjectSetDouble(0, m1_mss_obj, OBJPROP_PRICE, m1_sqz_mss_level);
+                    ObjectSetInteger(0, m1_mss_obj, OBJPROP_COLOR, clrCoral);
+                    ObjectSetInteger(0, m1_mss_obj, OBJPROP_STYLE, STYLE_DOT);
+                    ObjectSetInteger(0, m1_mss_obj, OBJPROP_WIDTH, 1);
+                } else { ObjectDelete(0, m1_mss_obj); }
+            } else { ObjectDelete(0, m1_mss_obj); }
         } else { ObjectDelete(0, m1_mss_obj); }
 
     } else {

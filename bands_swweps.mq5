@@ -43,6 +43,7 @@ input double               LotSize = 0.1;           // Fixed lot size (used when
 input bool                 Use_Auto_Lot = true;      // [TOGGLE] Auto-calculate lot size based on equity risk
 input double               Risk_Percent = 1.0;       // Risk per trade as % of equity (e.g. 1.0 = 1%)
 input int                  MagicNumber = 12345;
+input int                  Max_Slippage_Points = 0; // Max allowed slippage in points (0 = unrestricted)
 input bool                 Show_Panel = true; 
 
 input string               __Timing__ = "=== 2. Entry Timing Strategy ===";
@@ -317,6 +318,7 @@ double bb_up_m1_hist[], bb_dn_m1_hist[], atr_m1_hist[]; // M1 BB history for squ
 double dynamic_virtual_tp = 0.0;
 double locked_htf_virtual_tp = 0.0; // Captures static HTF target at entry
 datetime last_trade_bar = 0; 
+datetime last_entry_try_time = 0; // Cooldown timer for failed entries 
 
 // Base speed tracking (for ENTRY_DECELERATION)
 double peak_buy_speed = 0.0, peak_sell_speed = 0.0, current_speed = 0.0;
@@ -542,6 +544,11 @@ int GetHistoricalM1MomTrend(int bar_index) {
 //+------------------------------------------------------------------+
 int OnInit() {
     trade.SetExpertMagicNumber(MagicNumber);
+    if(Max_Slippage_Points > 0) {
+        trade.SetDeviationInPoints(Max_Slippage_Points); // Set max slippage for MT5 server
+    } else {
+        trade.SetDeviationInPoints(99999); // Unrestricted slippage
+    }
     
     ArraySetAsSeries(atr_m1, true);
     ArraySetAsSeries(atr_m5, true);
@@ -597,7 +604,11 @@ void OnTick() {
         trade_is_spike = false; d_pure_momentum = false; d_mom_status = "N/A";
         active_trade_is_upgraded = false;
         mh_mean_pullback_done = false;
-        CheckEntry();
+        
+        // Cooldown mechanism for repeated quick entry failures
+        if(TimeCurrent() - last_entry_try_time >= 3) {
+            CheckEntry();
+        }
     }
 
     if(do_panel) DrawDashboard();
@@ -609,6 +620,16 @@ int CountOpenPositions() {
         if(PositionGetTicket(i) > 0 && PositionGetString(POSITION_SYMBOL) == _Symbol && PositionGetInteger(POSITION_MAGIC) == MagicNumber) count++;
     }
     return count;
+}
+
+double TotalOpenLots() {
+    double total_lots = 0.0;
+    for(int i = 0; i < PositionsTotal(); i++) {
+        if(PositionGetTicket(i) > 0 && PositionGetString(POSITION_SYMBOL) == _Symbol && PositionGetInteger(POSITION_MAGIC) == MagicNumber) {
+            total_lots += PositionGetDouble(POSITION_VOLUME);
+        }
+    }
+    return total_lots;
 }
 
 bool UpdateIndicatorBuffers() {
@@ -2429,7 +2450,7 @@ void CheckEntry() {
 }
 
 double CalcLotSize(double sl_price_distance) {
-    if(!Use_Auto_Lot || sl_price_distance <= 0) return LotSize;
+    double lot = LotSize;
     double equity       = AccountInfoDouble(ACCOUNT_EQUITY);
     double risk_amount  = equity * (Risk_Percent / 100.0);
     double tick_size    = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
@@ -2437,11 +2458,28 @@ double CalcLotSize(double sl_price_distance) {
     double lot_step     = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
     double min_lot      = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
     double max_lot      = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
-    if(tick_size <= 0 || tick_value <= 0) return LotSize;
-    double ticks_in_sl  = sl_price_distance / tick_size;
-    double lot          = risk_amount / (ticks_in_sl * tick_value);
-    lot = MathFloor(lot / lot_step) * lot_step;   // normalise to lot step
-    lot = MathMax(min_lot, MathMin(max_lot, lot)); // clamp to broker limits
+    if(tick_size <= 0 || tick_value <= 0) return lot; // Fallback to LotSize (but clamped below)
+    
+    if(Use_Auto_Lot) {
+        double ticks_in_sl  = sl_price_distance / tick_size;
+        lot = risk_amount / (ticks_in_sl * tick_value);
+    } 
+
+    // --- Strict Fixed Lot Safety Control ---
+    double max_lot_allowed = Use_Auto_Lot ? max_lot : LotSize;
+    double current_open_lots = TotalOpenLots();
+    double available_lots = max_lot_allowed - current_open_lots;
+    
+    if(available_lots < min_lot) {
+        PrintFormat("SAFETY BAIL: Max lots reached. Allowed: %.2f | Open: %.2f", max_lot_allowed, current_open_lots);
+        return 0; // abort trade
+    }
+    
+    // Clamp the requested lot size so it doesn't push us over the limit
+    if(lot > available_lots) lot = available_lots;
+
+    lot = MathFloor(lot / lot_step) * lot_step;    // normalise to lot step
+    lot = MathMax(min_lot, MathMin(max_lot, lot)); // clamp to broker absolute limits
     return lot;
 }
 void ExecuteBuy(double ask, double bid, datetime bar_time, double live_speed, double prev_speed, long time_sec, double sl_mult = -1) {
@@ -2455,9 +2493,29 @@ void ExecuteBuy(double ask, double bid, datetime bar_time, double live_speed, do
     bool trade_exec = trade.Buy(lots, _Symbol, ask, sl, 0, cmt);
     if(trade_exec) {
         double atr_val = 0; if (ArraySize(atr_m1) > 0) atr_val = atr_m1[0];
-        PrintFormat("BUY ENTRY! Price: %.5f | SL: %.5f | Speed: %.2f | ATR: %.5f", ask, sl, peak_buy_speed, atr_val);
+        
+        // --- Calculate Slippage & Update Comment ---
+        double filled_price = trade.ResultPrice();
+        ulong ticket = trade.ResultOrder();
+        if(ticket == 0) ticket = trade.ResultDeal(); // fallback
+        
+        int slippage_points = 0;
+        if(filled_price > 0 && ask > 0) {
+            slippage_points = (int)MathRound((filled_price - ask) / _Point); 
+        }
+        string new_cmt = cmt + StringFormat("|Slp:%d", slippage_points);
+        // PositionModify doesn't allow comment changes directly in all broker configs, 
+        // but we can Print it and try to modify if supported.
+        trade.PositionModify(ticket, sl, 0); 
+        // Note: MT5 doesn't officially support changing a position comment after open via MQL5,
+        // so we must trust the terminal or log it aggressively here.
+        PrintFormat("BUY ENTRY! Req: %.5f | Fill: %.5f | SlipPts: %d | SL: %.5f | Speed: %.2f | ATR: %.5f", ask, filled_price, slippage_points, sl, peak_buy_speed, atr_val);
+        
         last_trade_bar = bar_time;
-        InitDynamicTP(ask, true);
+        InitDynamicTP(filled_price, true);
+    } else {
+        last_entry_try_time = TimeCurrent();
+        PrintFormat("BUY ENTRY FAILED! Req: %.5f | Retcode: %d - %s", ask, trade.ResultRetcode(), trade.ResultRetcodeDescription());
     }
 }
 void ExecuteSell(double bid, double ask, datetime bar_time, double live_speed, double prev_speed, long time_sec, double sl_mult = -1) {
@@ -2475,10 +2533,52 @@ void ExecuteSell(double bid, double ask, datetime bar_time, double live_speed, d
 
     bool trade_exec = trade.Sell(lots, _Symbol, bid, sl, 0, cmt);
     if(trade_exec) {
-        PrintFormat("SELL ENTRY! Price: %.5f | SL: %.5f | Speed: %.2f | ATR: %.5f", bid, sl, peak_sell_speed, atr_val);
+        // --- Calculate Slippage & Update Comment ---
+        double filled_price = trade.ResultPrice();
+        ulong ticket = trade.ResultOrder();
+        if(ticket == 0) ticket = trade.ResultDeal();
+        
+        int slippage_points = 0;
+        if(filled_price > 0 && bid > 0) {
+            slippage_points = (int)MathRound((bid - filled_price) / _Point); 
+        }
+        string new_cmt = cmt + StringFormat("|Slp:%d", slippage_points);
+        trade.PositionModify(ticket, sl, 0);
+        
+        PrintFormat("SELL ENTRY! Req: %.5f | Fill: %.5f | SlipPts: %d | SL: %.5f | Speed: %.2f | ATR: %.5f", bid, filled_price, slippage_points, sl, peak_sell_speed, atr_val);
+        
         last_trade_bar = bar_time;
-        InitDynamicTP(bid, false);
+        InitDynamicTP(filled_price, false);
+    } else {
+        last_entry_try_time = TimeCurrent();
+        PrintFormat("SELL ENTRY FAILED! Req: %.5f | Retcode: %d - %s", bid, trade.ResultRetcode(), trade.ResultRetcodeDescription());
     }
+}
+
+//+------------------------------------------------------------------+
+//| Aggressive Position Closing                                      |
+//+------------------------------------------------------------------+
+bool ClosePositionAggressive(ulong ticket, double lots_to_close = -1) {
+    int max_retries = 10;
+    int retry_count = 0;
+    bool success = false;
+    
+    while(retry_count < max_retries && !success) {
+        if(lots_to_close > 0) {
+            success = trade.PositionClosePartial(ticket, lots_to_close);
+        } else {
+            success = trade.PositionClose(ticket);
+        }
+        
+        if(success) {
+            return true;
+        } else {
+            PrintFormat("Close Error [Attempt %d]: %d - %s", retry_count + 1, trade.ResultRetcode(), trade.ResultRetcodeDescription());
+            retry_count++;
+            Sleep(100); // 100ms delay between aggressive retries
+        }
+    }
+    return false;
 }
 
 //+------------------------------------------------------------------+
@@ -3252,7 +3352,7 @@ void ManageOpenTrades() {
                 if((Exit_Trade_On_H1_Squeeze && h1_squeeze_danger) ||
                    (Exit_Trade_On_M5_Squeeze && m5_squeeze_danger) ||
                    (Exit_Trade_On_M1_Squeeze && m1_squeeze_danger)) {
-                    trade.PositionClose(ticket);
+                    ClosePositionAggressive(ticket);
                     continue;
                 }
             }
@@ -3518,7 +3618,7 @@ void ManageOpenTrades() {
                     
                     // Partial close
                     if(close_lots >= min_lot && close_lots < cur_lots) {
-                        trade.PositionClosePartial(ticket, close_lots);
+                        ClosePositionAggressive(ticket, close_lots);
                     }
                     
                     // Move SL to breakeven + ATR buffer in our favour (locks in a small profit)
@@ -3553,7 +3653,7 @@ void ManageOpenTrades() {
 
             // 5. Execution
             if(close_trade) {
-                trade.PositionClose(ticket);
+                ClosePositionAggressive(ticket);
                 continue;
             }
         }
